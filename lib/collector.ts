@@ -149,6 +149,11 @@ export async function collectAndSaveAll(): Promise<{
         runIndex,
         status: 'success',
         errorMessage: null,
+        // 어댑터가 분리해서 돌려준 값을 그대로 보존한다.
+        // retrievedSources가 null이면 "이 엔진은 후보 목록을 제공하지 않음"(ChatGPT)이라는 뜻이다.
+        retrievedSources: r.response.retrievedSources,
+        citedSpans: r.response.citedSpans,
+        searchPerformed: r.response.searchPerformed,
       });
 
       if (snapshotId) {
@@ -178,6 +183,11 @@ export async function collectAndSaveAll(): Promise<{
         runIndex,
         status: 'failed',
         errorMessage: r.error ?? '알 수 없는 오류',
+        // 실패한 호출은 답변 자체가 없다. 그래서 "0개"가 아니라 "모름"(null)이다.
+        // searchPerformed를 false로 적으면 "검색 없이 답했다"는 없던 사실이 생긴다.
+        retrievedSources: null,
+        citedSpans: null,
+        searchPerformed: null,
       });
 
       if (snapshotId) savedSnapshots++;

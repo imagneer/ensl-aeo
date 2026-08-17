@@ -28,10 +28,41 @@ export interface RetrievedSource {
   /** API가 돌려준 원본 URL — 정규화 때문에 원본을 잃지 않도록 보존 */
   rawUrl: string;
 
+  /**
+   * 출처의 도메인 (예: 'onetopdental.com').
+   *
+   * 왜 url에서 뽑지 않고 따로 저장하는가 (2026-08-17 실측 확인):
+   *   Gemini는 url 자리에 실제 주소가 아니라
+   *   vertexaisearch.cloud.google.com/grounding-api-redirect/... 라는
+   *   구글 중계 주소를 준다. 그래서 url에서 도메인을 뽑으면 Gemini 출처가
+   *   전부 google.com으로 잡혀 브랜드 매칭이 통째로 실패한다.
+   *   실제 도메인은 Gemini의 title 필드에 순수 도메인 형태로 들어온다(10/10 확인).
+   *   → 도메인을 얻는 방법이 엔진마다 달라서, 각 어댑터가 책임지고 채운다.
+   *
+   * ⚠️ Gemini는 도메인까지만 알 수 있고 "어느 페이지"인지는 모른다.
+   *    페이지 단위 비교를 할 때 Gemini는 참여할 수 없다.
+   */
+  domain: string;
+
   title?: string;
 
   /** 검색 결과 미리보기 텍스트 (Perplexity의 search_results만 제공) */
   snippet?: string;
+}
+
+/**
+ * 인용된 출처 1건 — 주소와 도메인을 한 쌍으로 묶는다.
+ *
+ * 왜 주소 목록과 도메인 목록을 따로 두지 않는가:
+ *   두 배열을 나란히 두면 길이가 어긋날 수 있고, 어긋나도 아무도 모른다.
+ *   한 쌍으로 묶으면 구조적으로 어긋날 수가 없다.
+ */
+export interface CitedSource {
+  /** 정규화된 URL. ⚠️ Gemini는 구글 중계 주소라 페이지 식별에 쓸 수 없다 */
+  url: string;
+
+  /** 도메인 (예: 'onetopdental.com') — 엔진 간 비교는 이 값을 기준으로 한다 */
+  domain: string;
 }
 
 /**
@@ -50,10 +81,10 @@ export interface CitedSpan {
   endIndex: number;
 
   /**
-   * 이 구간이 근거로 삼은 출처들의 정규화 URL.
+   * 이 구간이 근거로 삼은 출처들.
    * 한 구간이 여러 출처를 참조할 수 있으므로 배열이다.
    */
-  sourceUrls: string[];
+  sources: CitedSource[];
 
   /**
    * 구간 좌표를 얼마나 믿을 수 있는지.
@@ -182,6 +213,20 @@ export function normalizeUrl(input: string): string {
 }
 
 /**
+ * URL에서 도메인만 뽑는다 (예: 'https://www.onetopdental.com/a/b' → 'onetopdental.com').
+ *
+ * ⚠️ Gemini의 중계 주소에는 쓰면 안 된다. 전부 'vertexaisearch.cloud.google.com'이
+ *    나와서 실제 출처를 식별할 수 없다. Gemini는 title 값을 그대로 도메인으로 쓴다.
+ */
+export function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return ''; // URL 형식이 아니면 빈 값 (거짓 도메인을 지어내지 않는다)
+  }
+}
+
+/**
  * citedSpans에서 고유 출처 URL 목록을 뽑는다.
  *
  * ⚠️ 이 배열의 길이는 "사용한 출처 개수"이지 "인용 구간 개수"가 아니다.
@@ -192,7 +237,23 @@ export function normalizeUrl(input: string): string {
 export function getCitedUrls(spans: CitedSpan[]): string[] {
   const set = new Set<string>();
   for (const span of spans) {
-    for (const url of span.sourceUrls) set.add(url);
+    for (const source of span.sources) set.add(source.url);
+  }
+  return Array.from(set);
+}
+
+/**
+ * citedSpans에서 고유 도메인 목록을 뽑는다.
+ *
+ * 엔진 간 비교는 이 값을 기준으로 해야 한다. URL 기준으로 비교하면
+ * Gemini만 구글 중계 주소라서 다른 엔진과 절대 매칭되지 않는다.
+ */
+export function getCitedDomains(spans: CitedSpan[]): string[] {
+  const set = new Set<string>();
+  for (const span of spans) {
+    for (const source of span.sources) {
+      if (source.domain) set.add(source.domain);
+    }
   }
   return Array.from(set);
 }

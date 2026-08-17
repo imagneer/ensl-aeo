@@ -1,6 +1,6 @@
 // lib/adapters/anthropic.ts
 
-import { normalizeUrl, getCitedUrls } from '../types';
+import { normalizeUrl, getCitedUrls, extractDomain } from '../types';
 import type {
   EngineAdapter,
   AdapterResponse,
@@ -171,6 +171,7 @@ export const anthropicAdapter: EngineAdapter = {
         retrievedByUrl.set(url, {
           url,
           rawUrl: item.url, // 정규화 전 원본 보존 (http, www, 추적 파라미터 포함)
+          domain: extractDomain(item.url),
           ...(item.title ? { title: item.title } : {}),
           // snippet은 담지 않는다. Claude가 주는 encrypted_content는 암호화된
           // 값이라 사람이 읽을 수 있는 미리보기가 아니다 (2026-08-17 실측 확인).
@@ -239,7 +240,8 @@ export const anthropicAdapter: EngineAdapter = {
       // (2026-08-17 실측: citations 항목이 2개 붙은 블록이 있었는데 둘 다 같은
       //  onetopdental.com/implant/total-implant였다 → 합쳐서 출처 1개로 셌다.
       //  안 합치면 "이 구간이 2개 출처를 근거로 했다"는 틀린 값이 된다)
-      const sourceUrls = Array.from(
+      // Claude는 실제 주소를 주므로 도메인을 주소에서 뽑는다
+      const uniqueUrls = Array.from(
         new Set(
           block.citations
             .filter((c) => c.type === 'web_search_result_location' && c.url)
@@ -247,12 +249,12 @@ export const anthropicAdapter: EngineAdapter = {
         )
       );
 
-      if (sourceUrls.length === 0) continue; // 인용 형식이 다르거나 url이 없으면 좌표를 못 만든다
+      if (uniqueUrls.length === 0) continue; // 인용 형식이 다르거나 url이 없으면 좌표를 못 만든다
 
       citedSpans.push({
         startIndex,
         endIndex,
-        sourceUrls,
+        sources: uniqueUrls.map((url) => ({ url, domain: extractDomain(url) })),
         precision: 'block',
       });
     }

@@ -5,8 +5,9 @@ import type {
   AdapterResponse,
   RetrievedSource,
   CitedSpan,
+  CitedSource,
 } from '../types';
-import { normalizeUrl, getCitedUrls } from '../types';
+import { normalizeUrl, getCitedUrls, extractDomain } from '../types';
 
 /**
  * Perplexity Sonar API 어댑터
@@ -138,7 +139,7 @@ function buildCitedSpans(
     const clusterStart = match.index;
     const clusterEnd = clusterStart + match[0].length;
 
-    const sourceUrls: string[] = [];
+    const sources: CitedSource[] = [];
     for (const numberText of match[0].match(/\d+/g) ?? []) {
       const markerNumber = Number(numberText);
       const url = citationUrls[markerNumber - 1]; // 1-based → 0-based
@@ -154,16 +155,19 @@ function buildCitedSpans(
         continue;
       }
       // 한 덩어리 안의 중복([2][2])은 같은 출처 1개로 센다
-      if (!sourceUrls.includes(url)) sourceUrls.push(url);
+      // Perplexity는 실제 주소를 주므로 도메인을 주소에서 뽑는다
+      if (!sources.some((s) => s.url === url)) {
+        sources.push({ url, domain: extractDomain(url) });
+      }
     }
 
     // 유효 출처가 하나도 없는 덩어리는 구간으로 만들지 않는다.
     // (sourceUrls가 빈 CitedSpan은 "근거 없는 인용 구간"이라 의미가 없다)
-    if (sourceUrls.length > 0) {
+    if (sources.length > 0) {
       spans.push({
         startIndex: findSpanStart(rawText, prevClusterEnd, clusterStart),
         endIndex: clusterEnd, // 끝은 마커 덩어리의 끝(=slice에 쓰는 exclusive 인덱스)
-        sourceUrls,
+        sources,
         precision: 'marker', // 글자 인덱스를 엔진이 준 게 아니라 마커 위치로 추정한 값
       });
     }
@@ -243,6 +247,7 @@ export const perplexityAdapter: EngineAdapter = {
       .map((item) => ({
         url: normalizeUrl(item.url as string),
         rawUrl: item.url as string, // 정규화로 잃는 원본(추적 파라미터 등) 보존
+        domain: extractDomain(item.url as string),
         ...(item.title ? { title: item.title } : {}),
         ...(item.snippet ? { snippet: item.snippet } : {}),
       }));

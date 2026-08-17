@@ -1,7 +1,7 @@
 // lib/adapters/openai.ts
 
 import type { EngineAdapter, AdapterResponse, CitedSpan } from '../types';
-import { normalizeUrl, getCitedUrls } from '../types';
+import { normalizeUrl, getCitedUrls, extractDomain } from '../types';
 
 /**
  * OpenAI (ChatGPT) API 어댑터
@@ -115,7 +115,8 @@ export const openaiAdapter: EngineAdapter = {
         // 정규화를 빼면 Perplexity가 준 https://onetopdental.com/ 과
         // ChatGPT가 준 https://onetopdental.com/?utm_source=openai 가
         // 서로 다른 출처 2개로 집계되어 엔진 간 비교가 통째로 망가진다.
-        sourceUrls: [normalizeUrl(uc.url)],
+        // OpenAI는 실제 주소를 주므로 도메인을 주소에서 뽑는다
+        sources: [{ url: normalizeUrl(uc.url), domain: extractDomain(uc.url) }],
         // OpenAI는 글자 인덱스를 직접 주므로 'exact'.
         precision: 'exact',
       });

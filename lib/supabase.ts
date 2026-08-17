@@ -96,6 +96,7 @@ export async function fetchActiveQueries(): Promise<StoredQuery[]> {
 
 import { ENGINE_CONFIG } from './engine-config';
 import type { ParseResult, OverallMention } from './parser';
+import type { RetrievedSource, CitedSpan } from './types';
 
 export interface SnapshotToSave {
   queryId: string;
@@ -106,6 +107,29 @@ export interface SnapshotToSave {
   runIndex: number;
   status: 'success' | 'failed';
   errorMessage: string | null;
+
+  /**
+   * 본 것 — 검색해서 받아온 후보 출처 목록.
+   *
+   * ⚠️ null이 두 가지 뜻을 가진다. 구분은 status 칸으로 한다:
+   *   status='success' + null → 이 엔진은 후보 목록을 제공하지 않음 (ChatGPT)
+   *   status='failed'  + null → 수집 자체가 실패해서 아무것도 못 받음
+   * 빈 배열([])은 또 다르다 — "제공은 하는데 이번엔 0개였음"(검색을 건너뛴 경우).
+   */
+  retrievedSources: RetrievedSource[] | null;
+
+  /** 사용한 것 — 답변의 어느 구간이 어느 출처를 근거로 삼았는지 */
+  citedSpans: CitedSpan[] | null;
+
+  /**
+   * 검색을 실제로 수행했는지.
+   *
+   * ⚠️ 수집 실패 시에는 false가 아니라 null이다.
+   *    false는 "검색을 안 하고 답했다"는 사실 주장인데, 실패한 호출은
+   *    답변 자체가 없었던 것이라 그렇게 말할 수 없다. false로 적으면
+   *    나중에 "검색 없이 답한 관측"을 셀 때 실패분까지 섞여 들어간다.
+   */
+  searchPerformed: boolean | null;
 }
 
 /**
@@ -133,6 +157,13 @@ export async function saveSnapshot(snap: SnapshotToSave): Promise<string | null>
       status: snap.status,
       error_message: snap.errorMessage,
       executed_at: new Date().toISOString(),
+      // Day 8 추가 — 출처를 스냅샷 단위로 보존한다.
+      // 이전에는 출처가 mentions에만 흘러가서, 브랜드가 하나도 안 잡힌 답변은
+      // 그 답변이 참고한 출처가 통째로 사라졌다. 미노출 관측이야말로
+      // "그럼 AI는 누구를 근거로 삼았나"를 봐야 하는 자리인데 그게 없어졌다.
+      retrieved_sources: snap.retrievedSources,
+      cited_spans: snap.citedSpans,
+      search_performed: snap.searchPerformed,
     })
     .select('id')
     .single();

@@ -5,6 +5,7 @@ import type {
   AdapterResponse,
   RetrievedSource,
   CitedSpan,
+  CitedSource,
 } from '../types';
 import { normalizeUrl, getCitedUrls } from '../types';
 
@@ -79,6 +80,36 @@ function byteToCharIndex(map: Int32Array, byteIndex: number): number | null {
   if (byteIndex < 0 || byteIndex >= map.length) return null;
   const charIndex = map[byteIndex];
   return charIndex === -1 ? null : charIndex;
+}
+
+// ───────────────────────────────────────────────────────────
+// title → 도메인
+// ───────────────────────────────────────────────────────────
+
+/**
+ * Gemini는 uri에 구글 중계 주소를 주고, 실제 도메인은 title에 넣어준다.
+ * (2026-08-17 실측 확인: 10건 전부 'onetopdental.com', 'youtube.com' 같은
+ *  순수 도메인 형태였다)
+ *
+ * ⚠️ 그래도 검사하는 이유: title은 원래 "제목" 칸이다. 구글이 언제든 사람이 읽는
+ *    페이지 제목("강서구 치과 추천 TOP5")을 넣도록 바꿀 수 있다. 그때 그 문자열을
+ *    도메인으로 저장하면, 존재하지 않는 도메인이 집계에 섞여 들어가 조용히 틀린다.
+ *    도메인 모양이 아니면 지어내지 않고 빈 값으로 둔다.
+ */
+const DOMAIN_SHAPE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+function domainFromTitle(title: string | undefined): string {
+  const candidate = (title ?? '').trim().toLowerCase().replace(/^www\./, '');
+  if (!DOMAIN_SHAPE.test(candidate)) {
+    if (candidate) {
+      console.warn(
+        `[gemini] title이 도메인 모양이 아니라 도메인을 비워둔다: "${title}". ` +
+          `구글이 title 의미를 바꿨을 수 있으니 실측 재확인 필요.`
+      );
+    }
+    return '';
+  }
+  return candidate;
 }
 
 // ───────────────────────────────────────────────────────────
@@ -179,6 +210,8 @@ export const geminiAdapter: EngineAdapter = {
         return {
           url: normalizeUrl(web.uri),
           rawUrl: web.uri,
+          // ⚠️ 주소에서 뽑지 않는다. 주소가 구글 중계 주소라 전부 google이 된다.
+          domain: domainFromTitle(web.title),
           title: web.title,
           // snippet: Gemini는 검색 결과 미리보기 텍스트를 주지 않는다(2026-08-17 실측 확인)
         };
@@ -211,7 +244,7 @@ export const geminiAdapter: EngineAdapter = {
       const endByte = segment.endIndex;
 
       // 출처 URL 모으기 — 인덱스가 범위를 벗어나거나 빈 자리면 건너뛴다(방어)
-      const sourceUrls: string[] = [];
+      const sources: CitedSource[] = [];
       for (const idx of s.groundingChunkIndices ?? []) {
         const source =
           typeof idx === 'number' ? sourceByChunkIndex[idx] : undefined;
@@ -223,9 +256,11 @@ export const geminiAdapter: EngineAdapter = {
           continue;
         }
         // 같은 출처가 한 구간에 중복으로 붙는 경우가 있어 고유화한다
-        if (!sourceUrls.includes(source.url)) sourceUrls.push(source.url);
+        if (!sources.some((x) => x.url === source.url)) {
+          sources.push({ url: source.url, domain: source.domain });
+        }
       }
-      if (sourceUrls.length === 0) continue; // 근거 출처가 하나도 없으면 "사용한 것"이 아니다
+      if (sources.length === 0) continue; // 근거 출처가 하나도 없으면 "사용한 것"이 아니다
 
       // 바이트 → 글자 변환
       const startChar = byteToCharIndex(byteToChar, startByte);
@@ -245,7 +280,7 @@ export const geminiAdapter: EngineAdapter = {
         citedSpans.push({
           startIndex: startChar,
           endIndex: endChar,
-          sourceUrls,
+          sources,
           precision: 'exact',
         });
         continue;
@@ -276,7 +311,7 @@ export const geminiAdapter: EngineAdapter = {
           citedSpans.push({
             startIndex: found,
             endIndex: found + segment.text.length,
-            sourceUrls,
+            sources,
             precision: 'exact',
           });
           continue;
@@ -289,7 +324,7 @@ export const geminiAdapter: EngineAdapter = {
       citedSpans.push({
         startIndex: Math.min(startChar ?? 0, rawText.length),
         endIndex: Math.min(endChar ?? rawText.length, rawText.length),
-        sourceUrls,
+        sources,
         precision: 'block',
       });
     }
