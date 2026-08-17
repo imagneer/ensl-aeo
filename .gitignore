@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Day 8 실측 프로브 출력 (진단용, 커밋 불필요)
+probe-output/
