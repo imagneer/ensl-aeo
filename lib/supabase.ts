@@ -397,3 +397,65 @@ export async function fetchMentionsForAggregation(
     rank: row.rank,
   }));
 }
+
+// ── 이미 저장된 집계 결과 읽어오기 (Day 11 — 분석 함수 검증용) ──
+
+export interface StoredAggregatedMetric extends AggregatedMetricToSave {
+  id: string;
+}
+
+/**
+ * aggregated_metrics에 이미 저장된 행들을 (periodStart, aggregationLevel) 기준으로
+ * 조회한다. lib/analysis.ts의 계산 함수(computeShareOfVoice 등)는 이 형태의
+ * 데이터를 받아서 쓴다.
+ *
+ * ⚠️ anon이 아니라 supabaseAdmin을 쓴다. Day 9에서 GRANT ALL을 service_role에만
+ *    내렸고, anon이 aggregated_metrics를 읽을 수 있는지는 아직 확인 안 됐다.
+ *    확인 전까지는 snapshots·mentions와 같은 취급(admin 전용)으로 둔다.
+ *    나중에 대시보드가 브라우저에서 직접 읽게 하려면 이 전제를 다시 확인해야 한다.
+ *
+ * periodStart는 정확히 일치하는 값만 찾는다(범위 검색 아님) — daily 집계는
+ * aggregateAllQueriesForDay가 그 날의 모든 행에 동일한 periodStart를 쓰므로
+ * (kstDayBoundsUtc 참고) 정확히 일치시키는 게 더 안전하다.
+ */
+export async function fetchAggregatedMetrics(params: {
+  periodStart: string;
+  aggregationLevel?: 'batch' | 'daily';
+}): Promise<StoredAggregatedMetric[]> {
+  let query = supabaseAdmin
+    .from('aggregated_metrics')
+    .select(
+      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data'
+    )
+    .eq('period_start', params.periodStart);
+
+  if (params.aggregationLevel) {
+    query = query.eq('aggregation_level', params.aggregationLevel);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('aggregated_metrics 조회 실패:', error);
+    return [];
+  }
+
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    queryId: row.query_id,
+    brandId: row.brand_id,
+    engine: row.engine,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    aggregationLevel: row.aggregation_level,
+    batchId: row.batch_id,
+    totalRuns: row.total_runs,
+    mentionCount: row.mention_count,
+    visibilityRate: row.visibility_rate,
+    avgRank: row.avg_rank,
+    rankStddev: row.rank_stddev,
+    competitorData: row.competitor_data,
+  }));
+}
