@@ -182,7 +182,26 @@ export interface MentionToSave {
   brandNameRaw: string;
   isTarget: boolean;
   rank: number;
+
+  /**
+   * 이 브랜드에 연결된 출처 주소들.
+   * ⚠️ Day 8부터 의미가 바뀌었다. 이전에는 답변 전체의 출처를 모든 브랜드에
+   *    똑같이 복사했다(이름과 내용이 달랐다). 이제는 citation-linker가
+   *    브랜드별로 갈라낸 값이 들어간다.
+   */
   sourceUrls: string[];
+
+  /** 이 브랜드에 연결된 출처 도메인들 — 엔진 간 비교는 이 값을 쓴다 */
+  sourceDomains: string[];
+
+  /**
+   * 연결의 확신도. 판정 규칙은 lib/citation-linker.ts 참고.
+   *   confirmed = 문단에 이 브랜드만 있었음
+   *   estimated = 문단에 브랜드가 여럿이라 어느 출처가 누구 근거인지 모름
+   *   none      = 문단에 출처가 아예 없었음
+   * ⚠️ 이건 AI가 알려준 값이 아니라 엔슬의 판정이다.
+   */
+  citationConfidence: 'confirmed' | 'estimated' | 'none';
 }
 
 /**
@@ -200,6 +219,8 @@ export async function saveMentions(mentions: MentionToSave[]): Promise<boolean> 
       is_target: m.isTarget,
       rank: m.rank,
       source_urls: m.sourceUrls,
+      source_domains: m.sourceDomains,
+      citation_confidence: m.citationConfidence,
     }))
   );
 

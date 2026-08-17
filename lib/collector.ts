@@ -6,6 +6,7 @@ import { openaiAdapter } from './adapters/openai';
 import { geminiAdapter } from './adapters/gemini';
 import { fetchKnownBrands } from './supabase';
 import { parseBrandMentions, findUnregisteredBrands, buildOverallRanking } from './parser';
+import { linkCitationsToMentions } from './citation-linker';
 import type { AdapterResponse } from './types';
 import { retryWithBackoff } from './retry';
 
@@ -159,14 +160,25 @@ export async function collectAndSaveAll(): Promise<{
       if (snapshotId) {
         savedSnapshots++;
 
-        // overallRanking(등록+미등록 통합)을 그대로 mentions로 저장
-        const mentionsToSave = overallRanking.map((m) => ({
+        // 브랜드별로 출처를 갈라 붙인다 (Day 8).
+        // 이전에는 여기서 r.response.citations(답변 전체 출처)를 모든 브랜드에
+        // 똑같이 복사했다. 판정 규칙은 lib/citation-linker.ts 참고.
+        // linked는 overallRanking과 같은 순서·같은 길이라 인덱스로 짝짓는다.
+        const linked = linkCitationsToMentions(
+          r.response.rawText,
+          overallRanking,
+          r.response.citedSpans
+        );
+
+        const mentionsToSave = overallRanking.map((m, i) => ({
           snapshotId,
           brandId: m.brandId,
           brandNameRaw: m.brandName,
           isTarget: m.isTarget,
           rank: m.overallRank,
-          sourceUrls: r.response!.citations, // ⚠️ 브랜드별 세분화 아님, 스냅샷 전체 citations
+          sourceUrls: linked[i].urls,
+          sourceDomains: linked[i].domains,
+          citationConfidence: linked[i].confidence,
         }));
 
         const ok = await saveMentions(mentionsToSave);
