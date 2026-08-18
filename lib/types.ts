@@ -148,6 +148,20 @@ export interface AdapterResponse {
    *    노출률 집계에 그대로 섞으면 안 되고, 반드시 구분해서 다뤄야 한다.
    */
   searchPerformed: boolean;
+
+  /**
+   * Tier 1(SerpApi) 전용 - 검색 결과 페이지에 AI 요약 자체가 떴는지 여부.
+   * 
+   * ⚠️ searchPerformed와 다른 질문이다.
+   * searchPerformed = "검색을 하긴 했나" (Tier 1은 태생적으로 항상 true)
+   * overviewShown = "그 겸색 결과 화면에 AI 요약이 떴나" 
+   * 구글/네이버는 검색은 늘 되지만, 특정 쿼리엔 AI 요약이 안뜨는 경우도 있다. 
+   * (예: 너무 짧은 쿼리, 상거래성 쿼리 등). 이건 미노출이지 실패가 아니다. 
+   * - 대시보드에서 반드시 구분해서 보여줘야 한다.
+   * 
+   * Tier 2(기존 4개 엔진)는 이 개념이 없으므로 항상 null로 둔다.
+   */
+  overviewShown: boolean | null;
 }
 
 /**

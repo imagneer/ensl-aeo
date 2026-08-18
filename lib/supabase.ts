@@ -139,6 +139,12 @@ export interface SnapshotToSave {
    *    나중에 "검색 없이 답한 관측"을 셀 때 실패분까지 섞여 들어간다.
    */
   searchPerformed: boolean | null;
+/**
+ * Tier 1(SerpApi) 전용 - 검색 결과 페이지에 AI요약이 떴는지.
+ * Tier 2 엔진은 이 개념이 없으므로 null.
+ */
+  overviewShown: boolean | null;
+
 }
 
 /**
@@ -173,6 +179,7 @@ export async function saveSnapshot(snap: SnapshotToSave): Promise<string | null>
       retrieved_sources: snap.retrievedSources,
       cited_spans: snap.citedSpans,
       search_performed: snap.searchPerformed,
+      overview_shown: snap.overviewShown,
     })
     .select('id')
     .single();

@@ -9,6 +9,8 @@ import { parseBrandMentions, findUnregisteredBrands, buildOverallRanking } from 
 import { linkCitationsToMentions } from './citation-linker';
 import type { AdapterResponse } from './types';
 import { retryWithBackoff } from './retry';
+import { naverAiOverviewAdapter } from './adapters/naver-ai-briefing';
+import { googleAiOverviewAdapter } from './adapters/google-ai-overview';
 
 // 엔진 이름과 어댑터를 짝지어주는 목록.
 // 나중에 새 엔진 추가하고 싶으면 이 배열에 한 줄만 추가하면 됨.
@@ -17,6 +19,8 @@ const ADAPTERS = [
   { engine: 'claude', adapter: anthropicAdapter },   // engine-config.ts와 이름 통일
   { engine: 'chatgpt', adapter: openaiAdapter },      // engine-config.ts와 이름 통일
   { engine: 'gemini', adapter: geminiAdapter },
+  { engine: 'naver-ai-briefing', adapter: naverAiOverviewAdapter },
+  { engine: 'google-ai-overview', adapter: googleAiOverviewAdapter },
 ] as const;
 
 export interface CollectedResult {
@@ -155,6 +159,7 @@ export async function collectAndSaveAll(): Promise<{
         retrievedSources: r.response.retrievedSources,
         citedSpans: r.response.citedSpans,
         searchPerformed: r.response.searchPerformed,
+        overviewShown: r.response.overviewShown,
       });
 
       if (snapshotId) {
@@ -167,7 +172,8 @@ export async function collectAndSaveAll(): Promise<{
         const linked = linkCitationsToMentions(
           r.response.rawText,
           overallRanking,
-          r.response.citedSpans
+          r.response.citedSpans,
+          knownBrands          
         );
 
         const mentionsToSave = overallRanking.map((m, i) => ({
@@ -200,6 +206,7 @@ export async function collectAndSaveAll(): Promise<{
         retrievedSources: null,
         citedSpans: null,
         searchPerformed: null,
+        overviewShown: null,
       });
 
       if (snapshotId) savedSnapshots++;

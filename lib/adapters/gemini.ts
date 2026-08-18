@@ -347,6 +347,7 @@ export const geminiAdapter: EngineAdapter = {
        * (검색 자체를 안 하면 groundingChunks가 비어서 온다 — 2026-08-07 실측)
        */
       searchPerformed: retrievedSources.length > 0,
+      overviewShown: null, // Tier 2 엔진 - 이 개념 자체가 해당 없음
     };
   },
 };

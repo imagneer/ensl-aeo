@@ -276,6 +276,7 @@ export const perplexityAdapter: EngineAdapter = {
       timestamp,
       model: modelUsed,
       searchPerformed: true, // Perplexity는 모델 자체가 항상 검색하는 구조
+      overviewShown: null, // Tier 2 엔진 - 이 개념 자체가 해당 없음 
     };
   },
 };

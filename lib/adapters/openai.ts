@@ -153,6 +153,7 @@ export const openaiAdapter: EngineAdapter = {
       timestamp,
       model: modelUsed,
       searchPerformed: true, // gpt-5-search-api는 검색 전용 모델이라 항상 검색함
+      overviewShown: null, // Tier 2 엔진 - 이 개념 자체가 해당 없음
     };
   },
 };

@@ -287,6 +287,7 @@ export const anthropicAdapter: EngineAdapter = {
       //    관측이 보이면 실제로는 검색 실패였을 수 있다. (⚠️ 추정: 이 프로젝트에서
       //    아직 실제 에러 응답을 관측한 적은 없다)
       searchPerformed: true,
+      overviewShown: null, // Tier 2 엔진 - 이 개념 자체가 해당 없음
     };
   },
 };
