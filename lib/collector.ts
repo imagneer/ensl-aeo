@@ -117,23 +117,27 @@ import { randomUUID } from 'crypto';
 import { saveSnapshot, saveMentions } from './supabase';
 
 /**
- * 전체 파이프라인: DB에서 쿼리·브랜드 목록을 가져와 → 4개 엔진에 물어보고
+ * 전체 파이프라인: DB에서 쿼리·브랜드 목록을 가져와 → 6개 엔진에 물어보고
  * → 결과를 파싱해서 → snapshots·mentions 테이블에 저장한다.
+ * 한 번의 수집·파싱·저장 묶음(run 하나)을 처리한다.
  *
- * batchId: 이번 실행 전체를 하나로 묶는 식별자.
- *   Day 4 설계대로면 하루 3번(09/13/18시) 자동 실행될 때마다 새 batchId가 생겨야 한다.
- *   지금은 수동 실행이라 실행할 때마다 새로 하나 발급한다.
+ * batchId/runIndex를 함수 밖에서 받는 이유: 같은 시간대 안에서 여러 번 반복할 때
+ * (Day 4 설계: 시간대당 2회) 모든 반복이 같은 batchId를 공유해야 하기 때문이다.
+ * 이 함수는 "번호표를 누가, 언제 만드는지" 몰라도 되게 설계해서,
+ * 나중에 크론 구조가 바뀌어도(예: 반복마다 별도 트리거) 이 함수는 그대로 재사용한다.
  */
-export async function collectAndSaveAll(): Promise<{
+
+export async function collectAndSaveOnce(
+  batchId: string,
+  runIndex: number
+): Promise<{
   batchId: string;
   totalSnapshots: number;
   savedSnapshots: number;
   savedMentions: number;
 }> {
-  const batchId = randomUUID();
-  const runIndex = 1; // 오늘은 반복 없이 1회만
+  console.log(`=== collectAndSaveOnce 시작 (batchId: ${batchId}, runIndex: ${runIndex}) ===`);
 
-  console.log(`=== collectAndSaveAll 시작 (batchId: ${batchId}) ===`);
 
   const knownBrands = await fetchKnownBrands();
   const results = await collectAllQueries();
@@ -224,4 +228,46 @@ export async function collectAndSaveAll(): Promise<{
     savedSnapshots,
     savedMentions,
   };
+}
+
+/**
+ * A안 껍데기: 하나의 batchId로 2회 반복(run 1, run 2)을 순차 실행하고 합산한다.
+ * Day 4 설계("시간대 내 2회 반복")를 한 번의 함수 실행 안에서 구현하는 방식.
+ *
+ * 판단: run 1이 예상치 못한 에러로 죽어도 run 2는 시도한다(각각 try/catch로 감쌈).
+ * 이유: 한쪽이 죽었다고 나머지까지 포기하면 그날 그 시간대 데이터가 통째로 0이
+ * 되어버린다. 대신 어느 run이 실패했는지는 runErrors에 명시적으로 남긴다.
+ */
+export async function collectAndSaveAll(): Promise<{
+  batchId: string;
+  totalSnapshots: number;
+  savedSnapshots: number;
+  savedMentions: number;
+  runErrors: string[]; // 비어있으면 둘 다 정상
+}> {
+  const batchId = randomUUID();
+
+  let totalSnapshots = 0;
+  let savedSnapshots = 0;
+  let savedMentions = 0;
+  const runErrors: string[] = [];
+
+  for (let runIndex = 1; runIndex <= 2; runIndex++) {
+    try {
+      const result = await collectAndSaveOnce(batchId, runIndex);
+      totalSnapshots += result.totalSnapshots;
+      savedSnapshots += result.savedSnapshots;
+      savedMentions += result.savedMentions;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`=== run ${runIndex} 실패: ${msg} ===`);
+      runErrors.push(`run ${runIndex}: ${msg}`);
+    }
+  }
+
+  console.log(
+    `=== collectAndSaveAll 완료 (batchId: ${batchId}) — snapshot ${savedSnapshots}개, mentions ${savedMentions}개, 에러 ${runErrors.length}건 ===`
+  );
+
+  return { batchId, totalSnapshots, savedSnapshots, savedMentions, runErrors };
 }
