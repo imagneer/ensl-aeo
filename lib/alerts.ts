@@ -264,6 +264,7 @@ export interface AlertCheckSummary {
   updated: number;     // 기존 진행 중 알림의 연속 일수 갱신
   resolved: number;    // 회복돼서 종료된 알림
   pending: number;      // 오늘 데이터가 없거나 totalRuns=0이라 판단을 보류한 개수
+  errored: 0,   // ← 이 줄이 있는지 확인
 }
 
 /**
@@ -292,6 +293,7 @@ export async function runAlertCheckForDay(dateKST: string): Promise<AlertCheckSu
     updated: 0,
     resolved: 0,
     pending: 0,
+    errored: 0,   // ← 이 줄이 있는지 확인
   };
 
   for (const query of queries) {
@@ -302,6 +304,7 @@ export async function runAlertCheckForDay(dateKST: string): Promise<AlertCheckSu
     for (const engine of ENGINE_NAMES) {
       summary.attempted++;
 
+      try {
       const recent = await fetchRecentDailyMetrics({
         queryId: query.id,
         brandId: query.brandId,
@@ -361,6 +364,13 @@ export async function runAlertCheckForDay(dateKST: string): Promise<AlertCheckSu
 
       if (result === 'created') summary.created++;
       else summary.updated++;
+      } catch (error) {
+        console.error(
+          `알림 판정 실패 (query=${query.id}, engine=${engine}):`,
+          error
+        );
+        summary.errored++;
+      }
     }
   }
 
