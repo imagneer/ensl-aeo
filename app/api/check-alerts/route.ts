@@ -3,6 +3,9 @@
 import { NextResponse } from 'next/server';
 import { runAlertCheckForDay } from '@/lib/alerts';
 import { yesterdayKST } from '@/lib/aggregator';
+import { isAuthorizedCronRequest } from '@/lib/cron-auth';
+
+export const maxDuration = 60; // 아직 실측 전이지만 aggregate-daily와 비슷한 성격(DB 읽기+계산)이라 같은 값
 
 /**
  * 특정 KST 날짜에 대해 알림 판정(생성/갱신/종료/보류)을 수동으로 돌려보는
@@ -18,6 +21,10 @@ import { yesterdayKST } from '@/lib/aggregator';
  *    유일한 방법이다.
  */
 export async function GET(request: Request) {
+  if (!isAuthorizedCronRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const dateKST = searchParams.get('date') ?? yesterdayKST();

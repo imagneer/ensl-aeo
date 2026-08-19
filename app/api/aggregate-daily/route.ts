@@ -2,6 +2,9 @@
 
 import { NextResponse } from 'next/server';
 import { aggregateAllQueriesForDay, yesterdayKST } from '@/lib/aggregator';
+import { isAuthorizedCronRequest } from '@/lib/cron-auth';
+
+export const maxDuration = 60; // 실측 15~18초 + 넉넉한 여유
 
 /**
  * 특정 KST 날짜의 daily 집계를 수동으로 돌려보는 테스트 라우트.
@@ -13,6 +16,10 @@ import { aggregateAllQueriesForDay, yesterdayKST } from '@/lib/aggregator';
  *    유일한 방법이다. 진짜 자동화가 붙기 전까지는 수동 호출로 검증만 한다.
  */
 export async function GET(request: Request) {
+  if (!isAuthorizedCronRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const dateKST = searchParams.get('date') ?? yesterdayKST();
