@@ -252,85 +252,7 @@ export async function saveMentions(mentions: MentionToSave[]): Promise<boolean> 
 
   return true;
 }
-// ── 집계된 지표를 DB에 저장하기 (Day 9) ──
 
-export interface AggregatedMetricToSave {
-  queryId: string;
-  brandId: string;
-  engine: string;
-  periodStart: string;   // ISO 문자열
-  periodEnd: string;     // ISO 문자열
-  aggregationLevel: 'batch' | 'daily';
-  batchId: string | null; // daily 레벨은 여러 batch를 묶으므로 null
-
-  /** 유효 관측치 개수 (분모). 규칙: status='success' AND search_performed=true만 센다 */
-  totalRuns: number;
-
-  /** 유효 관측치 중 이 브랜드가 언급된 횟수 (분자) */
-  mentionCount: number;
-
-  /** totalRuns가 0이면 계산 불가이므로 null (0으로 채우지 않음) */
-  visibilityRate: number | null;
-
-  /** 언급된 관측치가 0건이면 null */
-  avgRank: number | null;
-
-  /** 유효 관측치(정확히는 언급된 관측치)가 2개 미만이면 null */
-  rankStddev: number | null;
-
-  /** 같은 기간 다른 등록 브랜드들의 요약 지표. 없으면 null */
-  competitorData: Record<string, { name: string; mentionCount: number; visibilityRate: number | null; avgRank: number | null }> | null;
-
-  /** 실패(status='failed') 관측치 개수. Day 13에 추가 — 실패율과 표본 부족을 구분하기 위함 */
-  failedCount: number;
-
-  /** 검색 스킵(status='success' && search_performed=false) 개수 */
-  skippedCount: number;
-}
-
-/**
- * aggregated_metrics 표에 집계 결과 1줄을 저장한다.
- *
- * ⚠️ 전제조건: service_role이 이 표에 대한 권한을 가지고 있어야 한다.
- *    (2026-08-17 실측: 권한이 없어서 SELECT조차 안 되는 상태였음. 아래 SQL을
- *     Supabase SQL Editor에서 먼저 실행해야 함 — day9-decision-aggregation.md 참고)
- *      GRANT ALL ON public.aggregated_metrics TO service_role;
- */
-
-
-export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from('aggregated_metrics')
-    .upsert(
-      {
-        query_id: m.queryId,
-        brand_id: m.brandId,
-        engine: m.engine,
-        period_start: m.periodStart,
-        period_end: m.periodEnd,
-        aggregation_level: m.aggregationLevel,
-        batch_id: m.batchId,
-        total_runs: m.totalRuns,
-        mention_count: m.mentionCount,
-        visibility_rate: m.visibilityRate,
-        avg_rank: m.avgRank,
-        rank_stddev: m.rankStddev,
-        competitor_data: m.competitorData,
-        failed_count: m.failedCount,
-        skipped_count: m.skippedCount,
-      },
-      { onConflict: 'query_id,brand_id,engine,aggregation_level,period_start' }
-    )
-    .select('id')
-    .single();
-
-  if (error) {
-    console.error('aggregated_metrics 저장 실패:', error);
-    return null;
-  }
-
-  return data.id;
-}
 
 
 
@@ -453,7 +375,7 @@ export async function fetchAggregatedMetrics(params: {
   let query = supabaseAdmin
     .from('aggregated_metrics')
     .select(
-      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data, failed_count, skipped_count'
+      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data, failed_count, skipped_count, top_keywords, keyword_extraction_status'
     )
     .eq('period_start', params.periodStart);
 
@@ -487,8 +409,11 @@ export async function fetchAggregatedMetrics(params: {
     competitorData: row.competitor_data,
     failedCount: row.failed_count,
     skippedCount: row.skipped_count,
+    topKeywords: row.top_keywords,
+    keywordExtractionStatus: row.keyword_extraction_status,
   }));
 }
+  
 // ── 최근 daily 집계 조회 (Day 13 — 알림 판정용) ──
 
 export interface RecentDailyMetric {
@@ -684,5 +609,187 @@ export async function resolveAlert(id: string): Promise<boolean> {
     console.error('알림 종료 처리 실패:', error);
     return false;
   }
+  return true;
+}
+
+
+export interface SnapshotForKeywordExtraction {
+  id: string;
+  rawResponse: string;
+}
+
+/**
+ * 키워드 추출용 스냅샷 조회 (Day 15).
+ * fetchSnapshotsForAggregation과 비슷하지만, raw_response(원문)까지 가져온다는
+ * 게 다르다. 노출률 집계엔 원문이 필요 없어서 원래 함수엔 안 넣었는데,
+ * 키워드 추출은 원문을 다시 파싱해야 해서(A안 결정) 별도로 만든다.
+ *
+ * status='success'인 것만 가져온다 — 실패한 관측엔 raw_response가 없거나
+ * 의미 없는 값일 수 있어서.
+ */
+export async function fetchSnapshotsForKeywordExtraction(params: {
+  queryId: string;
+  engine: string;
+  periodStart: string;
+  periodEnd: string;
+}): Promise<SnapshotForKeywordExtraction[]> {
+  const { data, error } = await supabaseAdmin
+    .from('snapshots')
+    .select('id, raw_response')
+    .eq('query_id', params.queryId)
+    .eq('engine', params.engine)
+    .eq('status', 'success')
+    .gte('executed_at', params.periodStart)
+    .lt('executed_at', params.periodEnd);
+
+  if (error) {
+    console.error('키워드 추출용 snapshots 조회 실패:', error);
+    return [];
+  }
+
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    rawResponse: row.raw_response,
+  }));
+}
+
+// lib/supabase.ts
+
+// ── AggregatedMetricToSave에 키워드 필드 추가 ──
+export interface AggregatedMetricToSave {
+  queryId: string;
+  brandId: string;
+  engine: string;
+  periodStart: string;
+  periodEnd: string;
+  aggregationLevel: 'batch' | 'daily';
+  batchId: string | null;
+  totalRuns: number;
+  mentionCount: number;
+  visibilityRate: number | null;
+  avgRank: number | null;
+  rankStddev: number | null;
+  competitorData: Record<string, { name: string; mentionCount: number; visibilityRate: number | null; avgRank: number | null }> | null;
+  failedCount: number;
+  skippedCount: number;
+
+  /**
+   * 노출 키워드 (Day 15 — collector 파이프라인 실연결).
+   * null = 이 기간에 타겟 브랜드가 언급 안 됨(추출 시도 자체를 안 함).
+   * [] = 언급은 됐는데 LLM이 뽑은 설명 표현이 없었음.
+   * [...] = 실제로 뽑힌 표현들.
+   * keywordExtractionStatus가 null이면 이 필드도 항상 null이어야 한다(둘이 쌍으로 움직임).
+   */
+  topKeywords: { keyword: string; count: number }[] | null;
+
+  /**
+   * null = 추출을 시도할 필요 없음(언급 안 됨).
+   * 'success' = 시도했고 성공(표현이 있든 없든).
+   * 'failed' = 시도했으나 재시도까지 다 실패 — 다음 aggregate-daily 실행 때 재시도 대상.
+   */
+  keywordExtractionStatus: 'success' | 'failed' | null;
+}
+
+export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .upsert(
+      {
+        query_id: m.queryId,
+        brand_id: m.brandId,
+        engine: m.engine,
+        period_start: m.periodStart,
+        period_end: m.periodEnd,
+        aggregation_level: m.aggregationLevel,
+        batch_id: m.batchId,
+        total_runs: m.totalRuns,
+        mention_count: m.mentionCount,
+        visibility_rate: m.visibilityRate,
+        avg_rank: m.avgRank,
+        rank_stddev: m.rankStddev,
+        competitor_data: m.competitorData,
+        failed_count: m.failedCount,
+        skipped_count: m.skippedCount,
+        top_keywords: m.topKeywords,
+        keyword_extraction_status: m.keywordExtractionStatus,
+      },
+      { onConflict: 'query_id,brand_id,engine,aggregation_level,period_start' }
+    )
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('aggregated_metrics 저장 실패:', error);
+    return null;
+  }
+
+  return data.id;
+}
+
+// ── 키워드 추출 실패건 조회 (Day 15) ──
+
+export interface FailedKeywordRow {
+  id: string;
+  queryId: string;
+  brandId: string;
+  engine: string;
+  periodStart: string;
+  periodEnd: string;
+}
+
+/**
+ * status='failed'인 행들을 가져온다. limit을 두는 이유: 브랜드가 늘어서
+ * 실패건이 쌓이더라도, 재시도에 쓰는 시간이 그날의 본 집계 시간을 잠식하지
+ * 않도록 상한을 둔다(부채 트래커에 남긴 "브랜드 늘면 300초 재계산 필요"와
+ * 같은 맥락 — 지금은 20이면 충분히 여유 있음).
+ */
+export async function fetchFailedKeywordExtractionRows(limit = 20): Promise<FailedKeywordRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('id, query_id, brand_id, engine, period_start, period_end')
+    .eq('keyword_extraction_status', 'failed')
+    .limit(limit);
+
+  if (error) {
+    console.error('키워드 추출 실패건 조회 실패:', error);
+    return [];
+  }
+
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    queryId: row.query_id,
+    brandId: row.brand_id,
+    engine: row.engine,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+  }));
+}
+
+// ── 키워드 필드만 부분 업데이트 (Day 15) ──
+// saveAggregatedMetric(upsert)을 재사용하지 않는 이유: 그러면 노출률·순위 등
+// 이미 확정된 값을 재계산해서 같이 덮어써야 한다. 재시도는 키워드 두 컬럼만
+// 고치면 되므로, id 하나로 그 두 컬럼만 건드리는 가벼운 함수로 분리한다.
+export async function updateKeywordExtractionResult(
+  id: string,
+  topKeywords: { keyword: string; count: number }[] | null,
+  status: 'success' | 'failed'
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .update({
+      top_keywords: topKeywords,
+      keyword_extraction_status: status,
+    })
+    .eq('id', id);
+
+  if (error) {
+    console.error('키워드 추출 결과 업데이트 실패:', error);
+    return false;
+  }
+
   return true;
 }

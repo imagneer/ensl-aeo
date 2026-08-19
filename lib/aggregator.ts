@@ -58,12 +58,25 @@ import {
   fetchActiveQueries,
   fetchKnownBrands,
   fetchSnapshotsForAggregation,
+  fetchSnapshotsForKeywordExtraction,
   fetchMentionsForAggregation,
+  fetchFailedKeywordExtractionRows,
   saveAggregatedMetric,
+  updateKeywordExtractionResult,
   type SnapshotForAggregation,
   type MentionForAggregation,
   type AggregatedMetricToSave,
 } from './supabase';
+
+import { parseBrandMentions, type KnownBrand } from './parser';
+import {
+  buildBrandParagraphs,
+  extractExpressionsFromParagraphs,
+  countTopKeywords,
+  type TopKeyword,
+} from './keyword-extractor';
+import { retryWithBackoff, isRetryableLLMError } from './retry';
+
 import { ENGINE_NAMES, type EngineName } from './engine-config';
 
 // ── 통계 헬퍼 ──
@@ -130,6 +143,74 @@ export interface AggregateOneParams {
   periodEnd?: string;
 }
 
+interface KeywordExtractionResult {
+  topKeywords: TopKeyword[] | null;
+  status: 'success' | 'failed';
+}
+
+/**
+ * (쿼리, 엔진, 기간) 조합 하나의 키워드 추출을 시도한다. (Day 15)
+ *
+ * position은 DB에 저장 안 돼 있어서(A안 결정), 원문을 다시 parseBrandMentions로
+ * 재파싱해서 구한다 — Day 12 실측 검증을 거친 것과 동일한 함수 재사용.
+ */
+async function attemptKeywordExtraction(params: {
+  queryId: string;
+  engine: string;
+  periodStart: string;
+  periodEnd: string;
+  targetBrandName: string;
+  knownBrands: KnownBrand[];
+}): Promise<KeywordExtractionResult> {
+  try {
+    const rawSnapshots = await fetchSnapshotsForKeywordExtraction({
+      queryId: params.queryId,
+      engine: params.engine,
+      periodStart: params.periodStart,
+      periodEnd: params.periodEnd,
+    });
+
+    const snapshotsForParagraphs = rawSnapshots
+      .map((s) => {
+        const parsed = parseBrandMentions(s.rawResponse, params.knownBrands);
+        if (!parsed.targetMention) return null; // 이 관측엔 타겟이 없었음(재파싱 기준)
+        return {
+          snapshotId: s.id,
+          rawText: s.rawResponse,
+          targetBrandName: params.targetBrandName,
+          allMentions: parsed.mentions.map((m) => ({
+            brandName: m.brandName,
+            position: m.position,
+          })),
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+
+    const paragraphs = buildBrandParagraphs(snapshotsForParagraphs);
+
+    // mentions 테이블 기준으론 언급됐는데 재파싱 결과 문단이 0개면, 저장된
+    // mentions와 원문이 어긋난다는 뜻 — 같은 입력이면 항상 같은 결과가 나오므로
+    // 재시도로 풀릴 문제가 아니다. success로 처리하고 빈 배열을 남긴다.
+    if (paragraphs.length === 0) {
+      return { topKeywords: [], status: 'success' };
+    }
+
+    const results = await retryWithBackoff(
+      () => extractExpressionsFromParagraphs(params.targetBrandName, paragraphs),
+      3,
+      isRetryableLLMError
+    );
+
+    return { topKeywords: countTopKeywords(results, 5), status: 'success' };
+  } catch (error) {
+    console.error(
+      `키워드 추출 실패 (query=${params.queryId}, engine=${params.engine}, period=${params.periodStart}):`,
+      error
+    );
+    return { topKeywords: null, status: 'failed' };
+  }
+}
+
 /**
  * (쿼리, 엔진, 기간) 조합 하나를 집계해서 저장 직전 형태(AggregatedMetricToSave)로 돌려준다.
  *
@@ -140,7 +221,8 @@ export interface AggregateOneParams {
  */
 export async function aggregateOne(
   params: AggregateOneParams,
-  otherBrands: { brandId: string; name: string }[]
+  otherBrands: { brandId: string; name: string }[],
+  allKnownBrands: KnownBrand[]   // ← 추가
 ): Promise<AggregatedMetricToSave | null> {
   const snapshots = await fetchSnapshotsForAggregation({
     queryId: params.queryId,
@@ -194,6 +276,25 @@ export async function aggregateOne(
         )
       : null;
 
+  let topKeywords: TopKeyword[] | null = null;
+  let keywordExtractionStatus: 'success' | 'failed' | null = null;
+
+  if (targetStats.mentionCount > 0) {
+    const targetBrand = allKnownBrands.find((b) => b.brandId === params.targetBrandId);
+    if (targetBrand) {
+      const kwResult = await attemptKeywordExtraction({
+        queryId: params.queryId,
+        engine: params.engine,
+        periodStart,
+        periodEnd,
+        targetBrandName: targetBrand.name,
+        knownBrands: allKnownBrands,
+      });
+      topKeywords = kwResult.topKeywords;
+      keywordExtractionStatus = kwResult.status;
+    }
+  }
+
   return {
     queryId: params.queryId,
     brandId: params.targetBrandId,
@@ -210,6 +311,9 @@ export async function aggregateOne(
     competitorData,
     failedCount,
     skippedCount,
+    topKeywords,              // ← 추가
+    keywordExtractionStatus,  // ← 추가
+
   };
 }
 
@@ -252,6 +356,42 @@ export interface DailyAggregationSummary {
   saved: number;        // 저장 성공 개수
   skipped: number;      // 그 기간에 스냅샷 자체가 없어서 건너뛴 개수 (규칙 E)
   failed: number;        // 저장 시도했는데 DB 에러로 실패한 개수
+  keywordRetryAttempted: number;   // ← 추가: 오늘 재시도 시도한 실패건 개수
+  keywordRetryRecovered: number;   // ← 추가: 그중 재시도로 성공한 개수
+}
+
+/**
+ * status='failed'인 키워드 추출 건을 다시 시도한다. (Day 15)
+ * aggregateAllQueriesForDay가 그날 할 일을 시작하기 전에 먼저 부른다 —
+ * "오늘의 실행 기회"를 "어제 못 끝낸 일"에도 나눠주는 것.
+ */
+export async function retryFailedKeywordExtractions(): Promise<{
+  attempted: number;
+  recovered: number;
+}> {
+  const failedRows = await fetchFailedKeywordExtractionRows();
+  const knownBrands = await fetchKnownBrands();
+
+  let recovered = 0;
+
+  for (const row of failedRows) {
+    const brand = knownBrands.find((b) => b.brandId === row.brandId);
+    if (!brand) continue; // 브랜드가 그 사이 삭제됐거나 못 찾으면 스킵(방어적)
+
+    const result = await attemptKeywordExtraction({
+      queryId: row.queryId,
+      engine: row.engine,
+      periodStart: row.periodStart,
+      periodEnd: row.periodEnd,
+      targetBrandName: brand.name,
+      knownBrands,
+    });
+
+    await updateKeywordExtractionResult(row.id, result.topKeywords, result.status);
+    if (result.status === 'success') recovered++;
+  }
+
+  return { attempted: failedRows.length, recovered };
 }
 
 /**
@@ -271,12 +411,22 @@ export interface DailyAggregationSummary {
  *   30건 이내)에서는 순차 처리 속도 손해가 무시할 만하다.
  */
 export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyAggregationSummary> {
+  const keywordRetryResult = await retryFailedKeywordExtractions();
   const { periodStart, periodEnd } = kstDayBoundsUtc(dateKST);
 
   const queries = await fetchActiveQueries();
   const knownBrands = await fetchKnownBrands();
 
-  const summary: DailyAggregationSummary = { dateKST, attempted: 0, saved: 0, skipped: 0, failed: 0 };
+  const summary: DailyAggregationSummary = { 
+    dateKST, 
+    attempted: 0, 
+    saved: 0, 
+    skipped: 0, 
+    failed: 0, 
+    keywordRetryAttempted: keywordRetryResult.attempted,   // ← 추가
+    keywordRetryRecovered: keywordRetryResult.recovered,   // ← 추가
+  
+  };
 
   for (const query of queries) {
     const otherBrands = knownBrands
@@ -295,7 +445,8 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
           periodStart,
           periodEnd,
         },
-        otherBrands
+        otherBrands,
+        knownBrands   // ← 추가
       );
 
       if (result === null) {

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { collectAndSaveAll } from '@/lib/collector';
 import { isAuthorizedCronRequest } from '@/lib/cron-auth';
 
-export const maxDuration = 300; // 실측 3분 + 여유. 6개 엔진 x 2회 반복이라 제일 오래 걸림
+export const maxDuration = 800; // Fluid Compute 켜짐 확인됨(2026-08-19). 향후 브랜드 늘어도 재계산 불필요하도록 상한까지 미리 설정
 
 /**
  * 전체 파이프라인 실행: 수집 → 파싱 → DB 저장.

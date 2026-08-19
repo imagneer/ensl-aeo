@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { aggregateAllQueriesForDay, yesterdayKST } from '@/lib/aggregator';
 import { isAuthorizedCronRequest } from '@/lib/cron-auth';
 
-export const maxDuration = 60; // 실측 15~18초 + 넉넉한 여유
+export const maxDuration = 300; // 기존 60 → 키워드 추출(LLM 호출) 추가 예정이라 여유 확보
 
 /**
  * 특정 KST 날짜의 daily 집계를 수동으로 돌려보는 테스트 라우트.
