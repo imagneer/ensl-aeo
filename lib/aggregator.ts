@@ -22,15 +22,15 @@
  *     ⚠️ 미등록 경쟁사가 답변마다 들쭉날쭉 등장하면, 등록 경쟁사 대비 위치는
  *     안 변했는데 overallRank만 흔들려서 "순위가 나빠졌다"는 착시가 생길 수 있다.
  *
- *  C. 분모(totalRuns)는 유효 관측치만 센다:
+  *  C. 분모(totalRuns)는 유효 관측치만 센다:
  *       status='success' AND search_performed=true
  *     실패(status='failed')와 검색-스킵(search_performed=false)은 둘 다 제외한다.
  *     (search_performed=false를 포함하면 "AEO 개선 효과가 반영될 수 없는 관측"이
  *      노출률에 섞여서, 콘텐츠를 개선해도 수치가 안 오르는 것처럼 보일 위험이 있다.
  *      이 원칙은 AGENTS.md에 이미 있던 것 — Day 9에서 분모 계산에 실제로 반영함)
- *     ⚠️ 제외된 실패/스킵 건수는 이번엔 별도로 기록하지 않는다(2026-08-17 확인,
- *     Day 12 알림 로직 작업 때 재검토 예정). 즉 지금은 "실패율이 높아서 표본이
- *     적은 기간"과 "표본이 원래 적은 기간"을 대시보드에서 구분할 수 없다.
+ *     (2026-08-18 Day 13에서 해결) 제외된 실패/스킵 건수는 이제 failedCount/
+ *     skippedCount로 따로 저장한다. "실패율이 높아서 표본이 적은 기간"과
+ *     "표본이 원래 적은 기간"을 이제 구분할 수 있다.
  *
  *  D. 언급된 관측치가 2개 미만이면 rankStddev는 null로 남긴다.
  *     "표준편차 계산 불가"와 "편차가 0(항상 같은 순위)"은 다른 사실이라
@@ -143,6 +143,12 @@ export async function aggregateOne(
     (s) => s.status === 'success' && s.searchPerformed === true
   );
   const totalRuns = validSnapshots.length;
+  // 유효/실패/스킵은 서로 겹치지 않는 배타적 분류다 (status는 'success'|'failed' 둘뿐이므로
+  // 항상 totalRuns + failedCount + skippedCount === snapshots.length 여야 정상이다)
+  const failedCount = snapshots.filter((s) => s.status === 'failed').length;
+  const skippedCount = snapshots.filter(
+    (s) => s.status === 'success' && s.searchPerformed === false
+  ).length;
 
   const validSnapshotIds = validSnapshots.map((s) => s.id);
   const mentions =
@@ -187,6 +193,8 @@ export async function aggregateOne(
     avgRank: targetStats.avgRank,
     rankStddev: targetStats.rankStddev,
     competitorData,
+    failedCount,
+    skippedCount,
   };
 }
 

@@ -139,12 +139,12 @@ export interface SnapshotToSave {
    *    나중에 "검색 없이 답한 관측"을 셀 때 실패분까지 섞여 들어간다.
    */
   searchPerformed: boolean | null;
-/**
- * Tier 1(SerpApi) 전용 - 검색 결과 페이지에 AI요약이 떴는지.
- * Tier 2 엔진은 이 개념이 없으므로 null.
- */
-  overviewShown: boolean | null;
 
+  /**
+   * Tier 1(SerpApi) 전용 - 검색 결과 페이지에 AI요약이 떴는지.
+   * Tier 2 엔진은 이 개념이 없으므로 null.
+   */
+  overviewShown: boolean | null;
 }
 
 /**
@@ -275,6 +275,12 @@ export interface AggregatedMetricToSave {
 
   /** 같은 기간 다른 등록 브랜드들의 요약 지표. 없으면 null */
   competitorData: Record<string, { name: string; mentionCount: number; visibilityRate: number | null; avgRank: number | null }> | null;
+
+  /** 실패(status='failed') 관측치 개수. Day 13에 추가 — 실패율과 표본 부족을 구분하기 위함 */
+  failedCount: number;
+
+  /** 검색 스킵(status='success' && search_performed=false) 개수 */
+  skippedCount: number;
 }
 
 /**
@@ -302,6 +308,8 @@ export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<s
       avg_rank: m.avgRank,
       rank_stddev: m.rankStddev,
       competitor_data: m.competitorData,
+      failed_count: m.failedCount,
+      skipped_count: m.skippedCount,
     })
     .select('id')
     .single();
@@ -432,7 +440,7 @@ export async function fetchAggregatedMetrics(params: {
   let query = supabaseAdmin
     .from('aggregated_metrics')
     .select(
-      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data'
+      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data, failed_count, skipped_count'
     )
     .eq('period_start', params.periodStart);
 
@@ -464,5 +472,204 @@ export async function fetchAggregatedMetrics(params: {
     avgRank: row.avg_rank,
     rankStddev: row.rank_stddev,
     competitorData: row.competitor_data,
+    failedCount: row.failed_count,
+    skippedCount: row.skipped_count,
   }));
+}
+// ── 최근 daily 집계 조회 (Day 13 — 알림 판정용) ──
+
+export interface RecentDailyMetric {
+  periodStart: string;   // ISO 문자열, KST 자정 기준 하루 시작
+  totalRuns: number;
+  mentionCount: number;
+}
+
+/**
+ * 특정 (쿼리, 브랜드, 엔진) 조합의 최근 daily 집계를 최신순으로 가져온다.
+ * lib/alerts.ts의 연속 미노출 판정(checkConsecutiveMissDays)이 쓴다.
+ *
+ * fetchAggregatedMetrics와 다른 점: 그쪽은 "하루 전체(모든 조합)"를 훑고,
+ * 이 함수는 "한 조합의 최근 며칠"을 훑는다 — 필터링 축이 달라서 별도 함수로
+ * 뺐다 (2026-08-19 판단, Day 13).
+ *
+ * limit을 넉넉히(기본 10) 잡는 이유: 그 사이 수집 자체가 안 돌아서 행이 없는
+ * 날이 섞여 있을 수 있다. "최근 N개 행"이 실제 "최근 N일"과 다를 수 있어서,
+ * 날짜 간격 판단은 호출부(checkConsecutiveMissDays)에서 하도록 넘긴다.
+ */
+export async function fetchRecentDailyMetrics(params: {
+  queryId: string;
+  brandId: string;
+  engine: string;
+  limit?: number;
+}): Promise<RecentDailyMetric[]> {
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('period_start, total_runs, mention_count')
+    .eq('query_id', params.queryId)
+    .eq('brand_id', params.brandId)
+    .eq('engine', params.engine)
+    .eq('aggregation_level', 'daily')
+    .order('period_start', { ascending: false })
+    .limit(params.limit ?? 10);
+
+  if (error) {
+    console.error('최근 daily 집계 조회 실패:', error);
+    return [];
+  }
+
+  if (!data) return [];
+
+  return data.map((row) => ({
+    periodStart: row.period_start,
+    totalRuns: row.total_runs,
+    mentionCount: row.mention_count,
+  }));
+}
+export interface ConsecutiveMissResult {
+  consecutiveDays: number;
+  periods: RecentDailyMetric[]; // 실제로 연속 미노출로 카운트된 날짜들 (최신순)
+}
+
+/**
+ * 최근 daily 집계(최신순 정렬)를 앞에서부터 훑어서, mention_count=0인 날이
+ * 며칠 연속인지 센다. (규칙 1, 2026-08-19 확인)
+ *
+ * 판정:
+ *   - totalRuns > 0 && mentionCount === 0 → "미노출 확인됨" (연속에 포함)
+ *   - totalRuns === 0                     → "판정 불가"(수집 실패/스킵) → 연속 끊음
+ *   - mentionCount > 0                    → "노출됨" → 연속 끊음
+ *   - 하루 이상 간격이 빈 경우(그날 행 자체가 없음, 즉 aggregator 규칙 E에서
+ *     스냅샷 시도조차 없었던 날) → 판정 불가와 동일하게 연속 끊음
+ *
+ * 왜 판정 불가를 미노출로 안 세는가: totalRuns=0은 "우리가 못 쟀다"는
+ * 뜻이지 "안 나왔다"는 뜻이 아니다. 못 잰 걸 미노출로 세면 수집 인프라
+ * 장애를 브랜드 노출 문제로 오판하게 된다 — 규칙 2(경쟁사 동조)와 같은 함정.
+ */
+export function checkConsecutiveMissDays(
+  recentMetrics: RecentDailyMetric[]
+): ConsecutiveMissResult {
+  const streak: RecentDailyMetric[] = [];
+
+  for (const row of recentMetrics) {
+    if (row.totalRuns === 0) break;      // 판정 불가
+    if (row.mentionCount > 0) break;     // 노출됨
+
+    if (streak.length > 0) {
+      const prevDate = new Date(streak[streak.length - 1].periodStart);
+      const currDate = new Date(row.periodStart);
+      const diffDays = (prevDate.getTime() - currDate.getTime()) / (24 * 60 * 60 * 1000);
+      if (diffDays !== 1) break; // 날짜가 하루 간격이 아님 → 그 사이 행이 통째로 없음
+    }
+
+    streak.push(row);
+  }
+
+  return { consecutiveDays: streak.length, periods: streak };
+}
+// ── alerts 테이블 (Day 13) ──
+
+export interface StoredAlert {
+  id: string;
+  consecutivePeriods: number;
+  competitorCorrelated: boolean;
+}
+
+/**
+ * 같은 (query, brand, engine, alert_type) 조합의 "진행 중인"(resolved_at이 NULL인)
+ * 알림을 찾는다. 있으면 갱신해야 하고, 없으면 새로 만들어야 한다 (규칙 5).
+ */
+export async function findOpenAlert(params: {
+  queryId: string;
+  brandId: string;
+  engine: string;
+  alertType: string;
+}): Promise<StoredAlert | null> {
+  const { data, error } = await supabaseAdmin
+    .from('alerts')
+    .select('id, consecutive_periods, competitor_correlated')
+    .eq('query_id', params.queryId)
+    .eq('brand_id', params.brandId)
+    .eq('engine', params.engine)
+    .eq('alert_type', params.alertType)
+    .is('resolved_at', null)
+    .maybeSingle();
+
+  if (error) {
+    console.error('진행 중인 알림 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    consecutivePeriods: data.consecutive_periods,
+    competitorCorrelated: data.competitor_correlated,
+  };
+}
+
+/** 새 알림 1건을 만든다. is_confirmed는 항상 false로 시작한다(사람 검토 전 상태 — 2026-08-19 확인). */
+export async function insertAlert(params: {
+  queryId: string;
+  brandId: string;
+  engine: string;
+  alertType: string;
+  consecutivePeriods: number;
+  competitorCorrelated: boolean;
+  details: Record<string, unknown>;
+}): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('alerts')
+    .insert({
+      query_id: params.queryId,
+      brand_id: params.brandId,
+      engine: params.engine,
+      alert_type: params.alertType,
+      consecutive_periods: params.consecutivePeriods,
+      competitor_correlated: params.competitorCorrelated,
+      is_confirmed: false,
+      details: params.details,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('알림 생성 실패:', error);
+    return null;
+  }
+  return data.id;
+}
+
+/** 진행 중인 알림의 연속 일수/동조 여부를 갱신한다 (새 행을 만들지 않는다). */
+export async function updateAlert(
+  id: string,
+  params: { consecutivePeriods: number; competitorCorrelated: boolean; details: Record<string, unknown> }
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('alerts')
+    .update({
+      consecutive_periods: params.consecutivePeriods,
+      competitor_correlated: params.competitorCorrelated,
+      details: params.details,
+    })
+    .eq('id', id);
+
+  if (error) {
+    console.error('알림 갱신 실패:', error);
+    return false;
+  }
+  return true;
+}
+
+/** 노출이 회복된 알림을 종료 처리한다 (규칙 5). */
+export async function resolveAlert(id: string): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('alerts')
+    .update({ resolved_at: new Date().toISOString() })
+    .eq('id', id);
+
+  if (error) {
+    console.error('알림 종료 처리 실패:', error);
+    return false;
+  }
+  return true;
 }
