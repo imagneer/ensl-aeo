@@ -1,4 +1,4 @@
-// app/api/test-check-alerts/route.ts
+// app/api/check-alerts/route.ts
 
 import { NextResponse } from 'next/server';
 import { runAlertCheckForDay } from '@/lib/alerts';
@@ -8,9 +8,9 @@ import { yesterdayKST } from '@/lib/aggregator';
  * 특정 KST 날짜에 대해 알림 판정(생성/갱신/종료/보류)을 수동으로 돌려보는
  * 테스트 라우트.
  *
- * 사용법: /api/test-check-alerts?date=2026-08-19
+ * 사용법: /api/check-alerts?date=2026-08-19
  *
- * ⚠️ 이 라우트를 돌리기 전에 그 날짜의 daily 집계(test-aggregate-daily)가
+ * ⚠️ 이 라우트를 돌리기 전에 그 날짜의 daily 집계(aggregate-daily)가
  *    먼저 끝나 있어야 한다 — 알림 판정은 aggregated_metrics를 읽어서 하므로,
  *    순서가 바뀌면 "오늘 데이터 없음"으로 전부 보류 처리된다.
  *

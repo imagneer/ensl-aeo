@@ -7,12 +7,12 @@ import { kstDayBoundsUtc } from '@/lib/aggregator';
 
 /**
  * 특정 KST 날짜의 daily 집계 행들을 읽어와서 share of voice를 계산해보는
- * 수동 검증용 라우트 (Day 11) — Day 9의 test-aggregate-daily와 같은 패턴.
+ * 수동 검증용 라우트 (Day 11) — Day 9의 aggregate-daily와 같은 패턴.
  *
  * 사용법: /api/test-share-of-voice?date=2026-08-17
  *
  * ⚠️ 이 라우트는 계산만 한다. 집계 자체를 새로 돌리지 않는다 —
- *    먼저 /api/test-aggregate-daily?date=... 로 그 날짜 집계를 만들어놔야
+ *    먼저 /api/aggregate-daily?date=... 로 그 날짜 집계를 만들어놔야
  *    결과가 나온다(안 만들어놨으면 결과 0건).
  */
 export async function GET(request: Request) {
