@@ -1,5 +1,6 @@
 // lib/collector.ts
-
+import type { EngineName } from './engine-config';
+import type { EngineAdapter } from './types';
 import { perplexityAdapter } from './adapters/perplexity';
 import { anthropicAdapter } from './adapters/anthropic';
 import { openaiAdapter } from './adapters/openai';
@@ -14,14 +15,16 @@ import { googleAiOverviewAdapter } from './adapters/google-ai-overview';
 
 // 엔진 이름과 어댑터를 짝지어주는 목록.
 // 나중에 새 엔진 추가하고 싶으면 이 배열에 한 줄만 추가하면 됨.
-const ADAPTERS = [
+
+const ADAPTERS: { engine: EngineName; adapter: EngineAdapter }[] = [
   { engine: 'perplexity', adapter: perplexityAdapter },
-  { engine: 'claude', adapter: anthropicAdapter },   // engine-config.ts와 이름 통일
-  { engine: 'chatgpt', adapter: openaiAdapter },      // engine-config.ts와 이름 통일
+  { engine: 'claude', adapter: anthropicAdapter },
+  { engine: 'chatgpt', adapter: openaiAdapter },
   { engine: 'gemini', adapter: geminiAdapter },
-  { engine: 'naver-ai-briefing', adapter: naverAiOverviewAdapter },
-  { engine: 'google-ai-overview', adapter: googleAiOverviewAdapter },
-] as const;
+  { engine: 'naver_ai_briefing', adapter: naverAiOverviewAdapter },
+  { engine: 'google_aio', adapter: googleAiOverviewAdapter },
+];
+
 
 export interface CollectedResult {
   engine: string;
