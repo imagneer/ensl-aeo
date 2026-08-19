@@ -83,6 +83,21 @@ function sampleStddev(nums: number[]): number {
   return Math.sqrt(variance);
 }
 
+
+/**
+ * 지금 이 순간 기준, "어제"에 해당하는 KST 날짜를 'YYYY-MM-DD' 문자열로 계산한다.
+ * new Date().toISOString()을 그대로 쓰면 안 되는 이유: KST 00:00~08:59 시간대엔
+ * UTC 날짜가 아직 하루 전이라, 호출 시각에 따라 우연히 맞거나 틀리는 상태가 된다.
+ * 여기선 시각에 상관없이 항상 KST 기준으로 명시적으로 계산한다.
+ */
+export function yesterdayKST(): string {
+  const nowUtc = new Date();
+  const kstMs = nowUtc.getTime() + 9 * 60 * 60 * 1000; // UTC → KST로 이동
+  const kstDate = new Date(kstMs);
+  kstDate.setUTCDate(kstDate.getUTCDate() - 1); // KST 기준 하루 전
+  return kstDate.toISOString().slice(0, 10);
+}
+
 // ── KST 날짜 경계 계산 ──
 
 /**

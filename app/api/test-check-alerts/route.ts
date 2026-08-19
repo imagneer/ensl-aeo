@@ -2,6 +2,7 @@
 
 import { NextResponse } from 'next/server';
 import { runAlertCheckForDay } from '@/lib/alerts';
+import { yesterdayKST } from '@/lib/aggregator';
 
 /**
  * 특정 KST 날짜에 대해 알림 판정(생성/갱신/종료/보류)을 수동으로 돌려보는
@@ -19,7 +20,7 @@ import { runAlertCheckForDay } from '@/lib/alerts';
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const dateKST = searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
+    const dateKST = searchParams.get('date') ?? yesterdayKST();
 
     console.log(`=== 알림 판정 시작 (${dateKST}, KST 기준) ===`);
 
