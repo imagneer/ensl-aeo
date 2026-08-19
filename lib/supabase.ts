@@ -151,6 +151,8 @@ export interface SnapshotToSave {
  * snapshots 테이블에 원시 응답 1건을 저장하고, 생성된 snapshot의 id를 돌려준다.
  * mentions를 저장하려면 이 id가 필요하다 (외래키 연결).
  */
+
+
 export async function saveSnapshot(snap: SnapshotToSave): Promise<string | null> {
   const tierInfo = ENGINE_CONFIG[snap.engine as keyof typeof ENGINE_CONFIG];
 
@@ -191,6 +193,9 @@ export async function saveSnapshot(snap: SnapshotToSave): Promise<string | null>
 
   return data.id;
 }
+
+
+
 
 export interface MentionToSave {
   snapshotId: string;
@@ -291,26 +296,31 @@ export interface AggregatedMetricToSave {
  *     Supabase SQL Editor에서 먼저 실행해야 함 — day9-decision-aggregation.md 참고)
  *      GRANT ALL ON public.aggregated_metrics TO service_role;
  */
+
+
 export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<string | null> {
   const { data, error } = await supabaseAdmin
     .from('aggregated_metrics')
-    .insert({
-      query_id: m.queryId,
-      brand_id: m.brandId,
-      engine: m.engine,
-      period_start: m.periodStart,
-      period_end: m.periodEnd,
-      aggregation_level: m.aggregationLevel,
-      batch_id: m.batchId,
-      total_runs: m.totalRuns,
-      mention_count: m.mentionCount,
-      visibility_rate: m.visibilityRate,
-      avg_rank: m.avgRank,
-      rank_stddev: m.rankStddev,
-      competitor_data: m.competitorData,
-      failed_count: m.failedCount,
-      skipped_count: m.skippedCount,
-    })
+    .upsert(
+      {
+        query_id: m.queryId,
+        brand_id: m.brandId,
+        engine: m.engine,
+        period_start: m.periodStart,
+        period_end: m.periodEnd,
+        aggregation_level: m.aggregationLevel,
+        batch_id: m.batchId,
+        total_runs: m.totalRuns,
+        mention_count: m.mentionCount,
+        visibility_rate: m.visibilityRate,
+        avg_rank: m.avgRank,
+        rank_stddev: m.rankStddev,
+        competitor_data: m.competitorData,
+        failed_count: m.failedCount,
+        skipped_count: m.skippedCount,
+      },
+      { onConflict: 'query_id,brand_id,engine,aggregation_level,period_start' }
+    )
     .select('id')
     .single();
 
@@ -321,6 +331,9 @@ export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<s
 
   return data.id;
 }
+
+
+
 
 // ── 집계용 원시 데이터 읽어오기 (Day 9) ──
 
