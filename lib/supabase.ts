@@ -793,3 +793,67 @@ export async function updateKeywordExtractionResult(
 
   return true;
 }
+export async function fetchTargetBrands() {
+  const { data, error } = await supabase
+    .from('brands')
+    .select('id, name')
+    .eq('is_target', true)
+    .order('name');
+
+  if (error) {
+    console.error('fetchTargetBrands error:', error);
+    return [];
+  }
+
+  return data;
+}
+export type DashboardMetric = {
+  queryId: string;
+  engine: string;
+  visibilityRate: number | null;
+  avgRank: number | null;
+  totalRuns: number;
+  mentionCount: number;
+  topKeywords: { keyword: string; count: number }[] | null;
+  periodStart: string;
+};
+
+export async function fetchLatestDashboardMetrics(brandId: string): Promise<DashboardMetric[]> {
+  const { data: latest, error: latestError } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('period_start')
+    .eq('brand_id', brandId)
+    .eq('aggregation_level', 'daily')
+    .order('period_start', { ascending: false })
+    .limit(1);
+
+  if (latestError || !latest || latest.length === 0) {
+    if (latestError) console.error('최신 집계일 조회 실패:', latestError);
+    return [];
+  }
+
+  const latestPeriod = latest[0].period_start;
+
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('query_id, engine, visibility_rate, avg_rank, total_runs, mention_count, top_keywords, period_start')
+    .eq('brand_id', brandId)
+    .eq('aggregation_level', 'daily')
+    .eq('period_start', latestPeriod);
+
+  if (error) {
+    console.error('대시보드 집계 조회 실패:', error);
+    return [];
+  }
+
+  return data.map((row) => ({
+    queryId: row.query_id,
+    engine: row.engine,
+    visibilityRate: row.visibility_rate,
+    avgRank: row.avg_rank,
+    totalRuns: row.total_runs,
+    mentionCount: row.mention_count,
+    topKeywords: row.top_keywords,
+    periodStart: row.period_start,
+  }));
+}
