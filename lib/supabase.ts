@@ -264,6 +264,7 @@ export interface SnapshotForAggregation {
   status: 'success' | 'failed';
   searchPerformed: boolean | null;
   executedAt: string;
+  batchId: string;        // ← 추가
 }
 
 /**
@@ -286,7 +287,7 @@ export async function fetchSnapshotsForAggregation(params: {
 }): Promise<SnapshotForAggregation[]> {
   let query = supabaseAdmin
     .from('snapshots')
-    .select('id, status, search_performed, executed_at')
+    .select('id, status, search_performed, executed_at, batch_id')
     .eq('query_id', params.queryId)
     .eq('engine', params.engine);
 
@@ -311,6 +312,7 @@ export async function fetchSnapshotsForAggregation(params: {
     status: row.status,
     searchPerformed: row.search_performed,
     executedAt: row.executed_at,
+    batchId: row.batch_id,
   }));
 }
 
@@ -375,7 +377,7 @@ export async function fetchAggregatedMetrics(params: {
   let query = supabaseAdmin
     .from('aggregated_metrics')
     .select(
-      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data, failed_count, skipped_count, top_keywords, keyword_extraction_status'
+      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data, failed_count, skipped_count, top_keywords, keyword_extraction_status, batch_count, time_slots'
     )
     .eq('period_start', params.periodStart);
 
@@ -411,6 +413,8 @@ export async function fetchAggregatedMetrics(params: {
     skippedCount: row.skipped_count,
     topKeywords: row.top_keywords,
     keywordExtractionStatus: row.keyword_extraction_status,
+    batchCount: row.batch_count,
+    timeSlots: row.time_slots,
   }));
 }
   
@@ -674,6 +678,14 @@ export interface AggregatedMetricToSave {
   competitorData: Record<string, { name: string; mentionCount: number; visibilityRate: number | null; avgRank: number | null }> | null;
   failedCount: number;
   skippedCount: number;
+    /**
+   * 그 기간에 실제로 실행된 서로 다른 batch 개수, 그리고 그 배치들이 걸친 시간대.
+   * batchCount와 timeSlots 길이가 다를 수 있다 — 같은 시간대에 배치가 두 번
+   * 돈 날(2026-08-19: 17:35, 18:02 둘 다 저녁)이 실제로 있었다.
+   * 헤더에 "3회 관측"처럼 고정 텍스트로 주장하지 않기 위해 저장한다 (Day 17).
+   */
+  batchCount: number;
+  timeSlots: string[];
 
   /**
    * 노출 키워드 (Day 15 — collector 파이프라인 실연결).
@@ -714,6 +726,8 @@ export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<s
         skipped_count: m.skippedCount,
         top_keywords: m.topKeywords,
         keyword_extraction_status: m.keywordExtractionStatus,
+        batch_count: m.batchCount,
+        time_slots: m.timeSlots,
       },
       { onConflict: 'query_id,brand_id,engine,aggregation_level,period_start' }
     )

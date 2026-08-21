@@ -129,6 +129,24 @@ export function kstDayBoundsUtc(dateKST: string): { periodStart: string; periodE
   return { periodStart: start.toISOString(), periodEnd: end.toISOString() };
 }
 
+export type TimeSlot = '아침' | '점심' | '저녁';
+
+/**
+ * UTC 시각을 KST로 바꿔서 어느 시간대인지 판정한다.
+ * 경계: 06:00~11:59 아침 / 12:00~16:59 점심 / 17:00~23:59 저녁
+ * 그 외(00:00~05:59)는 null — 라벨을 붙이지 않는다.
+ */
+export function kstTimeSlot(executedAt: string | Date): TimeSlot | null {
+  const d = new Date(executedAt);
+  // UTC 시각에 9시간을 더해 KST로 변환한 뒤, 그 시각의 '시'를 읽는다
+  const kstHour = new Date(d.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
+
+  if (kstHour >= 6 && kstHour < 12) return '아침';
+  if (kstHour >= 12 && kstHour < 17) return '점심';
+  if (kstHour >= 17) return '저녁';
+  return null;
+}
+
 // ── 핵심 집계 함수 ──
 
 export interface AggregateOneParams {
@@ -247,6 +265,18 @@ export async function aggregateOne(
     (s) => s.status === 'success' && s.searchPerformed === false
   ).length;
 
+  // 헤더 표시용 — 그날 실제로 몇 개 배치가, 어느 시간대에 돌았는지 (Day 17)
+  const batchCount = new Set(snapshots.map((s) => s.batchId)).size;
+
+  const SLOT_ORDER: TimeSlot[] = ['아침', '점심', '저녁'];
+  const slotSet = new Set(
+    snapshots
+      .map((s) => kstTimeSlot(s.executedAt))
+      .filter((v): v is TimeSlot => v !== null)
+  );
+  const timeSlots = SLOT_ORDER.filter((slot) => slotSet.has(slot));
+
+
   const validSnapshotIds = validSnapshots.map((s) => s.id);
   const mentions =
     validSnapshotIds.length > 0 ? await fetchMentionsForAggregation(validSnapshotIds) : [];
@@ -311,6 +341,8 @@ export async function aggregateOne(
     competitorData,
     failedCount,
     skippedCount,
+    batchCount,
+    timeSlots,
     topKeywords,              // ← 추가
     keywordExtractionStatus,  // ← 추가
 
