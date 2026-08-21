@@ -6,6 +6,8 @@ import {
   fetchLatestDashboardMetrics,
 } from "@/lib/supabase";
 
+export const dynamic = 'force-dynamic';   // ← 여기
+
 export default async function Home() {
   const brands = await fetchTargetBrands();
 
