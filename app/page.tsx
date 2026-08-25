@@ -43,6 +43,10 @@ export default async function Home() {
       ) : (
         <p className="text-sm text-muted-foreground">아직 집계된 데이터가 없습니다.</p>
       )}
+ <p className="text-xs text-muted-foreground/70">
+        M(멘션)·S(소스)·C(인용) — 엔진마다 제공하는 정보가 달라요. ChatGPT는 참고 출처
+        목록을 공개하지 않아 S 항목이 &quot;?&quot;(확인 불가)로 표시됩니다.
+      </p>
 
       {brandQueries.map((query) => (
         <section key={query.id} className="space-y-3">

@@ -45,7 +45,7 @@ import type { KnownBrand } from './parser';
 export async function fetchKnownBrands(): Promise<KnownBrand[]> {
   const { data, error } = await supabase
     .from('brands')
-    .select('id, name, aliases, is_target');
+    .select('id, name, aliases, is_target, domain');
 
   if (error) {
     console.error('brands 테이블 조회 실패:', error);
@@ -59,6 +59,7 @@ export async function fetchKnownBrands(): Promise<KnownBrand[]> {
     name: row.name,
     aliases: row.aliases || [],
     isTarget: row.is_target || false,
+    domain: row.domain || null,
   }));
 }
 // ── DB에서 쿼리 목록 가져오기 ──
@@ -264,7 +265,8 @@ export interface SnapshotForAggregation {
   status: 'success' | 'failed';
   searchPerformed: boolean | null;
   executedAt: string;
-  batchId: string;        // ← 추가
+  batchId: string;        
+  retrievedSources: RetrievedSource[] | null;   
 }
 
 /**
@@ -287,7 +289,7 @@ export async function fetchSnapshotsForAggregation(params: {
 }): Promise<SnapshotForAggregation[]> {
   let query = supabaseAdmin
     .from('snapshots')
-    .select('id, status, search_performed, executed_at, batch_id')
+    .select('id, status, search_performed, executed_at, batch_id,retrieved_sources')
     .eq('query_id', params.queryId)
     .eq('engine', params.engine);
 
@@ -313,6 +315,7 @@ export async function fetchSnapshotsForAggregation(params: {
     searchPerformed: row.search_performed,
     executedAt: row.executed_at,
     batchId: row.batch_id,
+    retrievedSources: row.retrieved_sources,   
   }));
 }
 
@@ -320,6 +323,7 @@ export interface MentionForAggregation {
   snapshotId: string;
   brandId: string | null;
   rank: number;
+  sourceDomains: string[] | null;   
 }
 
 /**
@@ -333,7 +337,7 @@ export async function fetchMentionsForAggregation(
 
   const { data, error } = await supabaseAdmin
     .from('mentions')
-    .select('snapshot_id, brand_id, rank')
+    .select('snapshot_id, brand_id, rank, source_domains')
     .in('snapshot_id', snapshotIds);
 
   if (error) {
@@ -347,6 +351,7 @@ export async function fetchMentionsForAggregation(
     snapshotId: row.snapshot_id,
     brandId: row.brand_id,
     rank: row.rank,
+    sourceDomains: row.source_domains,
   }));
 }
 
@@ -377,7 +382,7 @@ export async function fetchAggregatedMetrics(params: {
   let query = supabaseAdmin
     .from('aggregated_metrics')
     .select(
-      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data, failed_count, skipped_count, top_keywords, keyword_extraction_status, batch_count, time_slots'
+      'id, query_id, brand_id, engine, period_start, period_end, aggregation_level, batch_id, total_runs, mention_count, visibility_rate, avg_rank, rank_stddev, competitor_data, failed_count, skipped_count, top_keywords, keyword_extraction_status, batch_count, time_slots, has_source, has_citation'
     )
     .eq('period_start', params.periodStart);
 
@@ -415,6 +420,8 @@ export async function fetchAggregatedMetrics(params: {
     keywordExtractionStatus: row.keyword_extraction_status,
     batchCount: row.batch_count,
     timeSlots: row.time_slots,
+    hasSource: row.has_source,
+    hasCitation: row.has_citation,
   }));
 }
   
@@ -702,6 +709,17 @@ export interface AggregatedMetricToSave {
    * 'failed' = 시도했으나 재시도까지 다 실패 — 다음 aggregate-daily 실행 때 재시도 대상.
    */
   keywordExtractionStatus: 'success' | 'failed' | null;
+
+  /**
+   * S(소스)/C(인용) 판정 — Day 17.x, M/S/C 뱃지용.
+   * hasSource: true=자기 도메인이 참고 목록에 있었음 / false=참고 목록은 있는데 없었음 /
+   *            null=이 엔진이 참고 목록 자체를 안 줌(확인 불가, 예: ChatGPT)
+   * hasCitation: true=자기 도메인이 실제 각주로 인용됨 / false=인용 안 됨
+   *              (retrievedSources 유무와 무관하게 항상 true/false로 판정 가능)
+   */
+  hasSource: boolean | null;
+  hasCitation: boolean;
+
 }
 
 export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<string | null> {
@@ -728,6 +746,8 @@ export async function saveAggregatedMetric(m: AggregatedMetricToSave): Promise<s
         keyword_extraction_status: m.keywordExtractionStatus,
         batch_count: m.batchCount,
         time_slots: m.timeSlots,
+        has_source: m.hasSource,       // ← 추가
+        has_citation: m.hasCitation,   // ← 추가
       },
       { onConflict: 'query_id,brand_id,engine,aggregation_level,period_start' }
     )
@@ -830,6 +850,8 @@ export type DashboardMetric = {
   mentionCount: number;
   topKeywords: { keyword: string; count: number }[] | null;
   periodStart: string;
+  hasSource: boolean | null;   
+  hasCitation: boolean | null; 
 };
 
 export async function fetchLatestDashboardMetrics(brandId: string): Promise<DashboardMetric[]> {
@@ -850,7 +872,7 @@ export async function fetchLatestDashboardMetrics(brandId: string): Promise<Dash
 
   const { data, error } = await supabaseAdmin
     .from('aggregated_metrics')
-    .select('query_id, engine, visibility_rate, avg_rank, total_runs, mention_count, top_keywords, period_start')
+    .select('query_id, engine, visibility_rate, avg_rank, total_runs, mention_count, top_keywords, period_start, has_source, has_citation')
     .eq('brand_id', brandId)
     .eq('aggregation_level', 'daily')
     .eq('period_start', latestPeriod);
@@ -869,5 +891,7 @@ export async function fetchLatestDashboardMetrics(brandId: string): Promise<Dash
     mentionCount: row.mention_count,
     topKeywords: row.top_keywords,
     periodStart: row.period_start,
+    hasSource: row.has_source,       // ← 추가
+    hasCitation: row.has_citation,   // ← 추가
   }));
 }

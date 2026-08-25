@@ -288,6 +288,29 @@ export async function aggregateOne(
 
   const targetStats = computeBrandStats(params.targetBrandId, mentions, totalRuns);
 
+    // ── S/C 판정 (Day 17.x — M/S/C 뱃지) ──
+  const targetBrand = allKnownBrands.find((b) => b.brandId === params.targetBrandId);
+  const targetDomain = targetBrand?.domain ?? null;
+
+  // S(소스): 이 엔진이 그날 하나라도 retrievedSources를 실제로 준 적이 있는지 먼저 본다.
+  // 전부 null이면(구조적으로 후보 목록 자체를 안 주는 엔진, 예: ChatGPT) → 확인 불가(null).
+  const nonNullSourceSnapshots = validSnapshots.filter((s) => s.retrievedSources !== null);
+  let hasSource: boolean | null;
+  if (nonNullSourceSnapshots.length === 0 || !targetDomain) {
+    hasSource = null;
+  } else {
+    hasSource = nonNullSourceSnapshots.some((s) =>
+      s.retrievedSources!.some((src) => src.domain === targetDomain)
+    );
+  }
+
+  // C(인용): retrievedSources 유무와 무관하게, mentions.sourceDomains로 직접 판정.
+  // (ChatGPT도 citedSpans는 별도로 있어서 여기선 정상적으로 true/false가 나온다)
+  const targetMentions = mentions.filter((m) => m.brandId === params.targetBrandId);
+  const hasCitation: boolean = targetDomain
+    ? targetMentions.some((m) => m.sourceDomains?.includes(targetDomain))
+    : false;
+
   const competitorData: AggregatedMetricToSave['competitorData'] =
     otherBrands.length > 0
       ? Object.fromEntries(
@@ -343,8 +366,10 @@ export async function aggregateOne(
     skippedCount,
     batchCount,
     timeSlots,
-    topKeywords,              // ← 추가
-    keywordExtractionStatus,  // ← 추가
+    topKeywords,              
+    keywordExtractionStatus,  
+    hasSource,      
+    hasCitation,    
 
   };
 }

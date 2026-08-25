@@ -311,3 +311,10 @@ export function buildOverallRanking(
     overallRank: index + 1,
   }));
 }
+export interface KnownBrand {
+  brandId: string;      // Supabase brands.id (지금은 임시 문자열)
+  name: string;          // 정식 명칭
+  aliases: string[];     // 같은 브랜드를 가리키는 다른 표현들
+  isTarget: boolean;      // 타겟 브랜드 여부 (365서울원탑치과 = true)
+  domain: string | null;  // 브랜드 자기 도메인 (S/C 뱃지 판정용, Day 17.x 추가)
+}
