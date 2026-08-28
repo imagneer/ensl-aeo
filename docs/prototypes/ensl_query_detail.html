@@ -35,7 +35,19 @@
   .logo-row { display: flex; align-items: center; gap: 8px; padding: 8px 8px 16px; }
   .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); flex-shrink: 0; }
   .logo-text { font-size: 14px; font-weight: 500; }
-  .brand-box { padding: 8px; margin-bottom: 12px; background: var(--surface-1); border-radius: var(--radius); }
+  .brand-box { padding: 8px; margin-bottom: 12px; background: var(--surface-1); border-radius: var(--radius); position: relative; cursor: pointer; }
+  .brand-box .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .brand-box .row i { font-size: 13px; color: var(--text-muted); flex-shrink: 0; transition: transform 0.15s; }
+  .brand-box.open .row i.ti-chevron-down { transform: rotate(180deg); }
+  .brand-dropdown { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface-2); border: 0.5px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(26,26,24,0.10); z-index: 30; overflow: hidden; cursor: default; }
+  .brand-box.open .brand-dropdown { display: block; }
+  .brand-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-size: 13px; color: var(--text-primary); }
+  .brand-item:hover { background: var(--surface-1); }
+  .brand-item.active { color: var(--text-brand); font-weight: 500; }
+  .brand-item i { font-size: 14px; color: var(--text-brand); }
+  .brand-add { display: flex; align-items: center; gap: 7px; padding: 10px 12px; font-size: 12.5px; color: var(--text-secondary); border-top: 0.5px solid var(--border); }
+  .brand-add:hover { background: var(--surface-1); color: var(--text-primary); }
+  .brand-add i { font-size: 13px; color: var(--text-secondary); }
   .brand-box p { margin: 0; }
   .brand-box .label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
   .brand-box .name { font-size: 13px; font-weight: 500; }
@@ -92,6 +104,7 @@
   .cell.yes:hover { outline: 1px solid var(--text-success); }
   .cell.no { background: var(--surface-1); color: var(--text-muted); cursor: pointer; }
   .cell.no:hover { outline: 1px solid var(--border-strong); }
+  .cell.na { color: var(--border-strong); }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; color: var(--text-muted); }
   .legend span { display: flex; align-items: center; gap: 6px; }
   .legend .swatch { width: 16px; height: 16px; border-radius: 4px; display: inline-block; }
@@ -125,7 +138,14 @@
 
   <aside class="sidebar">
     <div class="logo-row"><div class="logo-mark"></div><span class="logo-text">ensl</span></div>
-    <div class="brand-box"><p class="label">진단 중인 브랜드</p><p class="name">365서울원탑치과</p></div>
+    <div class="brand-box" id="brand-box" onclick="toggleBrandDropdown(event)">
+      <p class="label">진단 중인 브랜드</p>
+      <div class="row"><p class="name">365서울원탑치과</p><i class="ti ti-chevron-down"></i></div>
+      <div class="brand-dropdown">
+        <div class="brand-item active">365서울원탑치과<i class="ti ti-check"></i></div>
+        <div class="brand-add" onclick="window.location.href='ensl_onboarding_step1.html'"><i class="ti ti-plus"></i>새 브랜드 추가</div>
+      </div>
+    </div>
     <nav>
       <a href="ensl_brand_awareness.html"><i class="ti ti-message-2"></i>브랜드 인지</a>
       <a href="ensl_brand_position.html" class="active"><i class="ti ti-target-arrow"></i>브랜드 현 위치</a>
@@ -149,7 +169,7 @@
         <h1 class="q-title">"강서구에서 임플란트 잘하는 치과 추천해줘"</h1>
         <div class="q-meta">
           <span class="badge strong">강하게 등장</span>
-          <span class="stat">등장률 71% · 42회 관측 중 30회 등장 · AI 5개에서 확인</span>
+          <span class="stat">등장률 75% · 24회 관측 중 18회 등장 · AI 5개에서 확인</span>
         </div>
       </div>
 
@@ -163,14 +183,14 @@
 
       <section>
         <h2 class="sec">AI마다 얼마나 다른가</h2>
-        <p class="sec-sub">같은 질문이어도 AI에 따라 결과가 갈려요. 여섯 곳을 합치면 42회 중 30회예요.</p>
+        <p class="sec-sub">같은 질문이어도 AI에 따라 결과가 갈려요. 여섯 곳을 합치면 24회 중 18회예요.</p>
         <div class="engine-grid">
-          <div class="engine-cell"><p class="en">Perplexity</p><p class="er">100%</p><p class="ec">7회 중 7회 등장</p></div>
-          <div class="engine-cell"><p class="en">ChatGPT</p><p class="er">100%</p><p class="ec">7회 중 7회 등장</p></div>
-          <div class="engine-cell"><p class="en">Gemini</p><p class="er">86%</p><p class="ec">7회 중 6회 등장</p></div>
-          <div class="engine-cell"><p class="en">네이버 AI 브리핑</p><p class="er">86%</p><p class="ec">7회 중 6회 등장</p></div>
-          <div class="engine-cell"><p class="en">Claude</p><p class="er">57%</p><p class="ec">7회 중 4회 등장</p></div>
-          <div class="engine-cell"><p class="en">구글 AI 개요</p><p class="er zero">0%</p><p class="ec">7회 중 0회 등장</p></div>
+          <div class="engine-cell"><p class="en">Perplexity</p><p class="er">100%</p><p class="ec">4회 중 4회 등장</p></div>
+          <div class="engine-cell"><p class="en">ChatGPT</p><p class="er">100%</p><p class="ec">4회 중 4회 등장</p></div>
+          <div class="engine-cell"><p class="en">Gemini</p><p class="er">100%</p><p class="ec">4회 중 4회 등장</p></div>
+          <div class="engine-cell"><p class="en">네이버 AI 브리핑</p><p class="er">100%</p><p class="ec">4회 중 4회 등장</p></div>
+          <div class="engine-cell"><p class="en">Claude</p><p class="er">50%</p><p class="ec">4회 중 2회 등장</p></div>
+          <div class="engine-cell"><p class="en">구글 AI 개요</p><p class="er zero">0%</p><p class="ec">4회 중 0회 등장</p></div>
         </div>
       </section>
 
@@ -184,35 +204,36 @@
             </thead>
             <tbody>
               <tr><th class="eng">Perplexity</th>
-                <td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td>
+                <td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td>
               </tr>
               <tr><th class="eng">ChatGPT</th>
-                <td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td>
+                <td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td>
               </tr>
               <tr><th class="eng">Gemini</th>
-                <td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell no">−</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td>
+                <td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td>
               </tr>
               <tr><th class="eng">네이버 AI 브리핑</th>
-                <td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell no">−</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td>
+                <td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td>
               </tr>
               <tr><th class="eng">Claude</th>
-                <td><span class="cell no">−</span></td><td><span class="cell yes">✓</span></td><td><span class="cell yes">✓</span></td><td><span class="cell no">−</span></td><td><span class="cell yes">✓</span></td><td><span class="cell no">−</span></td><td><span class="cell yes">✓</span></td>
+                <td><span class="cell no">−</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td><td><span class="cell no">−</span></td><td><span class="cell na">·</span></td><td><span class="cell yes">✓</span></td><td><span class="cell na">·</span></td>
               </tr>
               <tr><th class="eng">구글 AI 개요</th>
-                <td><span class="cell no">−</span></td><td><span class="cell no">−</span></td><td><span class="cell no">−</span></td><td><span class="cell no">−</span></td><td><span class="cell no">−</span></td><td><span class="cell no">−</span></td><td><span class="cell no">−</span></td>
+                <td><span class="cell no">−</span></td><td><span class="cell na">·</span></td><td><span class="cell no">−</span></td><td><span class="cell na">·</span></td><td><span class="cell no">−</span></td><td><span class="cell no">−</span></td><td><span class="cell na">·</span></td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="legend">
-          <span><span class="swatch" style="background:var(--bg-success);"></span>등장함 (30회)</span>
-          <span><span class="swatch" style="background:var(--surface-1);"></span>관측했지만 등장 안 함 (12회)</span>
+          <span><span class="swatch" style="background:var(--bg-success);"></span>등장함 (18회)</span>
+          <span><span class="swatch" style="background:var(--surface-1);"></span>관측했지만 등장 안 함 (6회)</span>
+          <span><span class="swatch" style="border:0.5px solid var(--border-strong);"></span>이 날은 관측하지 않음</span>
         </div>
       </section>
 
       <section>
         <h2 class="sec">이 질문에서 반복된 표현</h2>
-        <p class="sec-sub">우리 브랜드가 등장할 때 자주 함께 쓰인 말이에요. 30회 등장 중 몇 번 쓰였는지 붙였어요.</p>
+        <p class="sec-sub">우리 브랜드가 등장할 때 자주 함께 쓰인 말이에요. 18회 등장 중 몇 번 쓰였는지 붙였어요.</p>
         <div class="expr-chips">
           <span>고난도 수술 경험 <b style="font-weight:500; color:var(--text-muted);">· 12회</b></span>
           <span>자체 기공 시스템 <b style="font-weight:500; color:var(--text-muted);">· 9회</b></span>
@@ -234,9 +255,9 @@
           <p class="quote short">"강서구 임플란트로는 <mark class="ours">365서울원탑치과</mark>가 자주 언급됩니다. 고난도 케이스 경험과 전문의 협진 체계를 갖추고 있어 복잡한 치료에도 대응이 가능하다고 소개됩니다. 이 외에 <mark class="comp">강서○○치과</mark>도 함께 거론됩니다…"</p>
           <p class="quote full">"강서구에서 임플란트 진료를 받을 수 있는 치과는 여러 곳이 있습니다.<br><br>강서구 임플란트로는 <mark class="ours">365서울원탑치과</mark>가 자주 언급됩니다. 고난도 케이스 경험과 전문의 협진 체계를 갖추고 있어 복잡한 치료에도 대응이 가능하다고 소개됩니다. 자체 기공 시스템을 운영해 보철물 제작 기간을 줄일 수 있다는 안내도 확인됩니다.<br><br>이 외에 <mark class="comp">강서○○치과</mark>도 함께 거론됩니다. 지하철역과 가깝고 야간 진료를 운영해 접근성이 좋다는 점이 언급됩니다.<br><br>다만 임플란트는 개인의 잇몸 상태와 뼈 상태에 따라 치료 방법과 기간이 달라지므로, 실제 진료 전 상담을 통해 확인하는 것이 좋습니다."</p>
           <p class="src-links">출처
-            <a href="https://map.naver.com/p/search/365서울원탑치과" target="_blank" rel="noopener">네이버 플레이스 ↗</a>
-            <a href="https://onetopdental.com" target="_blank" rel="noopener">병원 홈페이지 ↗</a>
-            <a href="https://cafe.naver.com/gangseoresident" target="_blank" rel="noopener">지역 커뮤니티 ↗</a>
+            <a href="#">네이버 플레이스 ↗</a>
+            <a href="#">병원 홈페이지 ↗</a>
+            <a href="#">지역 커뮤니티 ↗</a>
           </p>
           <button class="expand-btn" onclick="tglQuote(this)">답변 전체 보기 ↓</button>
         </div>
@@ -251,8 +272,8 @@
           <p class="quote short">"강서구에서 임플란트 진료를 하는 곳으로 <mark class="ours">365서울원탑치과</mark>, <mark class="comp">강서○○치과</mark> 등이 확인됩니다. <mark class="ours">365서울원탑치과</mark>는 자체 기공 시스템을 운영한다고 안내되어 있습니다…"</p>
           <p class="quote full">"강서구에서 임플란트 진료를 하는 곳으로 <mark class="ours">365서울원탑치과</mark>, <mark class="comp">강서○○치과</mark> 등이 확인됩니다.<br><br><mark class="ours">365서울원탑치과</mark>는 자체 기공 시스템을 운영한다고 안내되어 있습니다. 원장진의 전문 분야가 나뉘어 있어 협진이 가능하다는 설명도 있습니다.<br><br><mark class="comp">강서○○치과</mark>는 평일 야간 진료를 운영합니다.<br><br>진료 시간과 비용은 병원별로 다르므로 방문 전 확인이 필요합니다."</p>
           <p class="src-links">출처
-            <a href="https://map.naver.com/p/search/365서울원탑치과" target="_blank" rel="noopener">네이버 플레이스 ↗</a>
-            <a href="https://blog.naver.com/onetopdental" target="_blank" rel="noopener">브랜드 블로그 ↗</a>
+            <a href="#">네이버 플레이스 ↗</a>
+            <a href="#">브랜드 블로그 ↗</a>
           </p>
           <button class="expand-btn" onclick="tglQuote(this)">답변 전체 보기 ↓</button>
         </div>
@@ -266,13 +287,13 @@
           <p class="quote short">"강서구 임플란트 치과로는 <mark class="comp">○○플란트치과</mark>, <mark class="comp">강서○○치과</mark>가 안내됩니다…"</p>
           <p class="quote full">"강서구 임플란트 치과로는 <mark class="comp">○○플란트치과</mark>, <mark class="comp">강서○○치과</mark>가 안내됩니다.<br><br><mark class="comp">○○플란트치과</mark>는 임플란트 전문 진료를 표방하며 자체 기공소를 운영합니다.<br><br><mark class="comp">강서○○치과</mark>는 지역 내 접근성이 좋은 위치에 있습니다."</p>
           <p class="src-links">출처
-            <a href="https://blog.naver.com/gangseo-dental-info" target="_blank" rel="noopener">지역 블로그 ↗</a>
-            <a href="https://onetopdental.com" target="_blank" rel="noopener">병원 홈페이지 ↗</a>
+            <a href="#">지역 블로그 ↗</a>
+            <a href="#">병원 홈페이지 ↗</a>
           </p>
           <button class="expand-btn" onclick="tglQuote(this)">답변 전체 보기 ↓</button>
         </div>
 
-        <button style="width:100%; margin-top:12px; font-size:13px;">이전 회차 더 보기 (39건)</button>
+        <button style="width:100%; margin-top:12px; font-size:13px;">이전 회차 더 보기 (21건)</button>
       </section>
 
     </div>
@@ -291,5 +312,16 @@ function tglQuote(btn) {
 }
 </script>
 
+
+<script>
+function toggleBrandDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('brand-box').classList.toggle('open');
+}
+document.addEventListener('click', function () {
+  var box = document.getElementById('brand-box');
+  if (box) box.classList.remove('open');
+});
+</script>
 </body>
 </html>
