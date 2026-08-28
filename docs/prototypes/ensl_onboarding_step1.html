@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 브랜드 읽기</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6; --surface-1: #F1EFE8; --surface-2: #FFFFFF;
+    --text-primary: #1A1A18; --text-secondary: #5F5E5A; --text-muted: #8A8880;
+    --border: #E6E4DC; --border-strong: #D3D1C7;
+    --bg-success: #EAF3DE; --text-success: #27500A;
+    --brand: #00A4B8; --bg-brand: #DAEEF1; --text-brand: #007685;
+    --bg-warning: #FBF0DC; --text-warning: #7A4B08;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--surface-0); color: var(--text-primary); line-height: 1.5; }
+  input { font-family: inherit; }
+
+  .shell { display: flex; min-height: 100vh; }
+
+  /* 왼쪽: 입력 폼 */
+  .form-panel { width: 480px; flex-shrink: 0; background: var(--surface-2); padding: 40px 56px; display: flex; flex-direction: column; justify-content: center; }
+  .top-row { position: fixed; top: 32px; left: 56px; right: calc(100% - 480px + 56px); display: flex; align-items: center; justify-content: space-between; }
+  .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); }
+  .logout-btn { font-size: 13px; color: var(--text-secondary); background: transparent; border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  .step-eyebrow { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+  .step-eyebrow b { color: var(--text-primary); }
+  .step-dots { display: flex; gap: 5px; margin-bottom: 28px; }
+  .step-dots span { width: 22px; height: 3px; border-radius: 2px; background: var(--border-strong); }
+  .step-dots span.done { background: var(--text-primary); }
+  h1 { font-size: 32px; font-weight: 500; line-height: 1.3; margin: 0 0 14px; letter-spacing: -0.01em; }
+  .step-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.65; margin: 0 0 40px; }
+
+  .field label { display: block; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 8px; }
+  .url-input { width: 100%; font-size: 15px; padding: 14px 16px; border: 0.5px solid var(--border-strong); border-radius: var(--radius); color: var(--text-primary); }
+  .url-input:focus { outline: none; border-color: var(--text-primary); }
+  .url-input::placeholder { color: var(--text-muted); }
+  .field-caption { font-size: 12px; color: var(--text-muted); margin: 10px 0 28px; }
+  .field-error { display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--text-warning); margin: 10px 0 20px; }
+  .field-error.show { display: flex; margin-bottom: 20px; }
+  .field-error i { font-size: 13px; }
+
+  .read-btn { width: 100%; font-size: 14px; font-weight: 500; padding: 14px; background: var(--text-primary); color: var(--surface-2); border: none; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; margin-bottom: 20px; }
+  .read-btn:hover { background: #000; }
+
+  .assist-box { display: flex; align-items: center; gap: 10px; background: var(--surface-1); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+  .assist-box i { font-size: 15px; color: var(--text-muted); flex-shrink: 0; }
+  .assist-box p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+
+  .no-site-link { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-muted); background: none; border: none; cursor: pointer; padding: 0; }
+  .no-site-link:hover { color: var(--text-primary); }
+  .no-site-link i { font-size: 12px; }
+
+  /* 오른쪽: 대담한 한 문장 */
+  .preview-panel { flex: 1; background: var(--text-primary); padding: 48px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+  .preview-inner { max-width: 560px; text-align: left; }
+  .pv-icon { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 28px; }
+  .pv-icon.fail { background: rgba(255,255,255,0.1); color: #E8A854; }
+  .pv-icon i { animation: spin 2.4s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .pv-line1 { font-size: 30px; font-weight: 500; color: #fff; line-height: 1.45; margin: 0 0 10px; }
+  .pv-line2 { font-size: 16px; font-weight: 400; color: rgba(255,255,255,0.6); line-height: 1.6; margin: 0; max-width: 420px; }
+  .pv-scanbar { position: absolute; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent); animation: scan 3.2s ease-in-out infinite; }
+  @keyframes scan { 0% { top: 20%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 80%; opacity: 0; } }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- 왼쪽: 입력 폼 -->
+  <div class="form-panel">
+    <div class="top-row">
+      <div class="logo-mark"></div>
+      <button class="logout-btn"><i class="ti ti-logout"></i>로그아웃</button>
+    </div>
+
+    <p class="step-eyebrow"><b>STEP 1</b> / 4</p>
+    <div class="step-dots"><span class="done"></span><span></span><span></span><span></span></div>
+    <h1>진단할 브랜드를<br>알려주세요.</h1>
+    <p class="step-desc">웹사이트를 알려주면 엔슬이 브랜드와 서비스를 먼저 읽어볼게요.</p>
+
+    <div class="field">
+      <label>브랜드 웹사이트</label>
+      <input class="url-input" type="text" id="url-input" placeholder="https://onetopdental.com" />
+    </div>
+    <p class="field-caption" id="field-caption">회사 소개와 주요 서비스가 잘 담긴 주소가 좋아요.</p>
+    <p class="field-error" id="field-error"><i class="ti ti-alert-triangle"></i>이 웹사이트를 읽지 못했어요. 주소를 다시 확인해주세요.</p>
+
+    <button class="read-btn" id="read-btn" onclick="startReading()">브랜드 읽기 <i class="ti ti-arrow-right"></i></button>
+
+    <div class="assist-box" id="assist-box">
+      <i class="ti ti-info-circle"></i>
+      <p>웹사이트 한 곳이면 충분해요. 나머지는 엔슬이 먼저 찾아볼게요.</p>
+    </div>
+
+    <button class="no-site-link" id="no-site-link" onclick="window.location.href='ensl_onboarding_step2_manual.html'"><i class="ti ti-arrow-right"></i>웹사이트가 없어요, 직접 입력할게요</button>
+  </div>
+
+  <!-- 오른쪽: 상태에 따라 바뀌는 패널 -->
+  <div class="preview-panel">
+    <div class="pv-scanbar" id="pv-scanbar"></div>
+    <div class="preview-inner" id="preview-inner">
+      <div class="pv-icon" id="pv-icon"><i class="ti ti-loader-2"></i></div>
+      <p class="pv-line1" id="pv-line1">브랜드를 읽을 준비가 됐어요.</p>
+      <p class="pv-line2" id="pv-line2">웹사이트를 알려주면, AI가 읽어낸 브랜드의 모습을 보여드릴게요.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function resetState() {
+  document.getElementById('field-error').classList.remove('show');
+  document.getElementById('url-input').style.borderColor = '';
+}
+
+function startReading() {
+  var val = document.getElementById('url-input').value.trim();
+  resetState();
+
+  // 1) URL 형식 오류 — 비어있거나 도메인처럼 안 생겼을 때
+  var looksLikeDomain = /^(https?:\/\/)?[a-zA-Z0-9가-힣-]+\.[a-zA-Z]{2,}/.test(val);
+  if (!val || !looksLikeDomain) {
+    document.getElementById('field-error').innerHTML = '<i class="ti ti-alert-triangle"></i>웹사이트 주소 형식이 올바르지 않아요. 예: onetopdental.com';
+    document.getElementById('field-error').classList.add('show');
+    document.getElementById('url-input').style.borderColor = 'var(--text-warning)';
+    return;
+  }
+
+  // 2) 형식은 맞음 → 읽는 중 애니메이션 시작
+  document.getElementById('pv-icon').className = 'pv-icon';
+  document.getElementById('pv-icon').innerHTML = '<i class="ti ti-loader-2"></i>';
+  document.getElementById('pv-line1').textContent = '웹사이트를 읽고 있어요.';
+  document.getElementById('pv-line2').textContent = val + ' 을(를) 분석하고 있어요.';
+  document.getElementById('read-btn').disabled = true;
+  document.getElementById('read-btn').style.opacity = '0.6';
+
+  setTimeout(function () {
+    // 테스트용 트리거: 주소에 'fail'이 포함되면 분석 실패 상태를 보여줌
+    var isFailTest = val.toLowerCase().indexOf('fail') !== -1;
+
+    if (isFailTest) {
+      // 3) 웹사이트 분석 실패
+      document.getElementById('pv-scanbar').style.display = 'none';
+      document.getElementById('pv-icon').className = 'pv-icon fail';
+      document.getElementById('pv-icon').innerHTML = '<i class="ti ti-alert-triangle"></i>';
+      document.getElementById('pv-line1').textContent = '이 웹사이트를 읽지 못했어요.';
+      document.getElementById('pv-line2').innerHTML = '주소가 정확한지 다시 확인하거나,<br>아래에서 직접 입력해도 괜찮아요.';
+
+      document.getElementById('field-error').innerHTML = '<i class="ti ti-alert-triangle"></i>웹사이트 분석에 실패했어요. 접근이 제한된 사이트일 수 있어요.';
+      document.getElementById('field-error').classList.add('show');
+      document.getElementById('url-input').style.borderColor = 'var(--text-warning)';
+      document.getElementById('read-btn').disabled = false;
+      document.getElementById('read-btn').style.opacity = '1';
+    } else {
+      // 4) 성공 → Step2로 이동
+      window.location.href = 'ensl_onboarding_step2.html';
+    }
+  }, 1800);
+}
+</script>
+
+</body>
+</html>

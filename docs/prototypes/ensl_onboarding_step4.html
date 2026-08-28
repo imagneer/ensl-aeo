@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 자리 질문 확인</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6; --surface-1: #F1EFE8; --surface-2: #FFFFFF;
+    --text-primary: #1A1A18; --text-secondary: #5F5E5A; --text-muted: #8A8880;
+    --border: #E6E4DC; --border-strong: #D3D1C7;
+    --bg-success: #EAF3DE; --text-success: #27500A;
+    --brand: #00A4B8; --bg-brand: #DAEEF1; --text-brand: #007685;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--surface-0); color: var(--text-primary); line-height: 1.5; }
+  button, input { font-family: inherit; }
+
+  .shell { display: flex; min-height: 100vh; }
+
+  /* 왼쪽 */
+  .form-panel { width: 480px; flex-shrink: 0; background: var(--surface-2); padding: 88px 56px 40px; display: flex; flex-direction: column; overflow-y: auto; }
+  .top-row { position: fixed; top: 32px; left: 56px; right: calc(100% - 480px + 56px); display: flex; align-items: center; justify-content: space-between; background: var(--surface-2); z-index: 2; }
+  .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); }
+  .logout-btn { font-size: 13px; color: var(--text-secondary); background: transparent; border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  .step-eyebrow { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+  .step-eyebrow b { color: var(--text-primary); }
+  .step-dots { display: flex; gap: 5px; margin-bottom: 18px; }
+  .step-dots span { width: 22px; height: 3px; border-radius: 2px; background: var(--border-strong); }
+  .step-dots span.done { background: var(--text-primary); }
+  h1 { font-size: 28px; font-weight: 500; line-height: 1.35; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .step-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin: 0 0 8px; }
+  .def-caption { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0 0 20px; }
+
+  .rule-box { display: flex; align-items: flex-start; gap: 9px; background: var(--surface-1); border-radius: var(--radius); padding: 12px 14px; margin: 16px 0 26px; }
+  .rule-box i { font-size: 14px; color: var(--text-muted); margin-top: 1px; flex-shrink: 0; }
+  .rule-box p { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+  .rule-box strong { color: var(--text-primary); font-weight: 500; }
+
+  .list-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .list-label span { font-size: 12.5px; color: var(--text-secondary); font-weight: 500; }
+  .list-label .count { font-size: 12px; color: var(--text-muted); }
+
+  .q-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 0.5px solid var(--border-strong); border-radius: var(--radius); margin-bottom: 8px; opacity: 0; animation: qRowIn 0.45s ease-out forwards; }
+  @keyframes qRowIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .gen-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-brand); background: var(--bg-brand); border-radius: 20px; padding: 5px 12px; width: fit-content; margin-bottom: 20px; }
+  .gen-note .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-brand); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,164,184,0.5); } 50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(0,164,184,0); } }
+  .q-check { position: relative; width: 20px; height: 20px; flex-shrink: 0; cursor: pointer; }
+  .q-check input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .q-check .box { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--border-strong); background: var(--surface-2); transition: background 0.15s, border-color 0.15s; }
+  .q-check .box i { font-size: 13px; color: var(--text-brand); opacity: 0; transform: scale(0.6); transition: opacity 0.15s, transform 0.15s; }
+  .q-check input:checked ~ .box { background: var(--bg-brand); border-color: var(--bg-brand); }
+  .q-check input:checked ~ .box i { opacity: 1; transform: scale(1); }
+  .qtext-wrap { flex: 1; min-width: 0; padding-top: 1px; }
+  .qtag { font-size: 10.5px; color: var(--text-muted); margin: 0 0 3px; }
+  .q-row .qtext { font-size: 13.5px; margin: 0; line-height: 1.5; }
+  .q-row .qtext b { font-weight: 500; }
+  .q-row .del-btn { border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 15px; padding: 4px; flex-shrink: 0; }
+  .q-row .del-btn:hover { color: var(--text-primary); }
+
+  .add-row { display: flex; align-items: center; gap: 8px; border: 0.5px dashed var(--border-strong); border-radius: var(--radius); padding: 12px 14px; color: var(--text-muted); font-size: 13.5px; background: none; cursor: pointer; width: 100%; margin-top: 4px; }
+  .add-row:hover { color: var(--text-primary); border-color: var(--text-primary); }
+  .add-row i { font-size: 13px; }
+
+  .spacer { flex: 1; min-height: 24px; }
+  .next-row { display: flex; justify-content: flex-end; margin-top: 20px; padding-top: 16px; border-top: 0.5px solid var(--border); }
+  .next-btn { font-size: 13.5px; font-weight: 500; padding: 11px 22px; background: var(--text-primary); color: var(--surface-2); border: none; border-radius: var(--radius); display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .next-btn:disabled { background: var(--border-strong); color: var(--text-muted); cursor: not-allowed; }
+  .q-check.disabled { opacity: 0.4; pointer-events: none; }
+  .next-btn:hover { background: #000; }
+
+  /* 오른쪽: 다크 리빙 패널 */
+  .preview-panel { flex: 1; background: var(--text-primary); padding: 48px; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+
+  .ripple { position: absolute; top: 50%; left: 50%; border: 0.5px solid rgba(0,164,184,0.35); border-radius: 50%; width: 40px; height: 40px; transform: translate(-50%,-50%) scale(1); opacity: 0; animation: ripple 6s ease-out infinite; pointer-events: none; }
+  .ripple.r2 { animation-delay: 3s; }
+  @keyframes ripple {
+    0% { transform: translate(-50%,-50%) scale(1); opacity: 0.15; }
+    60% { opacity: 0.06; }
+    100% { transform: translate(-50%,-50%) scale(20); opacity: 0; }
+  }
+
+  .preview-inner { width: 100%; max-width: 460px; position: relative; z-index: 1; }
+  .pv-eyebrow { font-size: 13px; color: rgba(255,255,255,0.45); margin: 0 0 16px; display: flex; align-items: center; gap: 8px; }
+  .pv-eyebrow i { font-size: 14px; color: var(--brand); }
+  .pv-livedot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); display: inline-block; animation: pulse 2s ease-in-out infinite; }
+  .pv-title { font-size: 24px; font-weight: 500; color: #fff; line-height: 1.4; margin: 0 0 8px; }
+  .pv-sub { font-size: 13px; color: rgba(255,255,255,0.5); line-height: 1.6; margin: 0 0 28px; }
+
+  .pv-qlist { display: flex; flex-direction: column; gap: 10px; }
+  .pv-qitem { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: rgba(255,255,255,0.06); border-radius: var(--radius); opacity: 0; animation: qRowIn 0.4s ease-out forwards; }
+  .pv-qitem .num { width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); font-size: 11px; font-weight: 500; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .pv-qitem .text { font-size: 13.5px; color: rgba(255,255,255,0.9); }
+
+  /* 질문 추가 모달 */
+  .add-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(26,26,24,0.45); z-index: 50; align-items: center; justify-content: center; padding: 20px; }
+  .add-modal-overlay.open { display: flex; }
+  .add-modal-box { background: var(--surface-2); border-radius: 12px; width: 100%; max-width: 380px; padding: 24px; }
+  .add-modal-title { font-size: 15px; font-weight: 500; margin: 0 0 14px; }
+  .add-modal-input { width: 100%; font-size: 14px; padding: 11px 13px; border: 0.5px solid var(--border-strong); border-radius: var(--radius); margin-bottom: 16px; }
+  .add-modal-input:focus { outline: none; border-color: var(--text-primary); }
+  .add-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .add-modal-cancel { font-size: 13px; color: var(--text-secondary); background: none; border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 9px 16px; cursor: pointer; }
+  .add-modal-cancel:hover { background: var(--surface-1); }
+  .add-modal-confirm { font-size: 13px; font-weight: 500; color: var(--surface-2); background: var(--text-primary); border: none; border-radius: var(--radius); padding: 9px 16px; cursor: pointer; }
+  .add-modal-confirm:hover { background: #000; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- 왼쪽 -->
+  <div class="form-panel">
+    <div class="top-row">
+      <div class="logo-mark"></div>
+      <button class="logout-btn"><i class="ti ti-logout"></i>로그아웃</button>
+    </div>
+
+    <p class="step-eyebrow"><b>STEP 4</b> / 4</p>
+    <div class="step-dots"><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span></div>
+    <h1>브랜드 이름 없이 물으면,<br>AI는 누구를 추천할까요?</h1>
+    <p class="step-desc">브랜드 정보를 바탕으로 자리 질문 후보를 만들고, 먼저 아홉 개를 골라뒀어요. 그대로 사용하거나, 더 궁금한 질문을 골라주세요.</p>
+    <p class="def-caption">자리 질문은 브랜드 이름을 빼고 지역·치료·조건을 물어, 어떤 브랜드가 답에 등장하는지 확인하는 질문이에요.</p>
+
+    <div class="gen-note"><span class="dot"></span>12개 질문 생성 완료</div>
+
+    <div class="list-label">
+      <span>자리 질문 후보 12개</span>
+      <span class="count" id="q-count">9 / 9개 선택됨</span>
+    </div>
+
+    <div class="q-row" style="animation-delay:0.03s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q1" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 1 · 지역+임플란트</p><p class="qtext">"강서구에서 임플란트 잘하는 치과는?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.08s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q2" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 2 · 지역 전체</p><p class="qtext">"강서구 치과 추천해줘"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.13s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q3" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 3 · 지역+치아교정</p><p class="qtext">"강서구에서 치아교정 잘하는 치과는?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.18s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q4" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 4 · 지역+야간진료</p><p class="qtext">"강서구 야간진료 치과 추천해줘"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.23s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q5" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 5 · 조건(자체 기공소)</p><p class="qtext">"자체 기공소가 있는 임플란트 치과는?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.28s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q6" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 6 · 임플란트 전체</p><p class="qtext">"전체 임플란트 잘하는 치과 추천해줘"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.33s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q7" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 7 · 지역+정밀 보철</p><p class="qtext">"강서구에서 정밀 보철 잘하는 치과는?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.38s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q8" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 8 · 조건(고난도 케이스)</p><p class="qtext">"뼈이식이나 재수술이 필요한데 어느 임플란트 치과가 좋아?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.43s;">
+      <label class="q-check"><input type="checkbox" checked class="qcb" data-key="q9" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">추천 질문 9 · 지역+전문의 협진</p><p class="qtext">"강서구 전문의 협진 치과 추천해줘"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.48s;">
+      <label class="q-check"><input type="checkbox" class="qcb" data-key="q10" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">다른 후보 · 지역+가격</p><p class="qtext">"강서구에서 가격 합리적인 임플란트 치과는?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.53s;">
+      <label class="q-check"><input type="checkbox" class="qcb" data-key="q11" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">다른 후보 · 지역+주차</p><p class="qtext">"주차 가능한 강서구 치과는?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="q-row" style="animation-delay:0.58s;">
+      <label class="q-check"><input type="checkbox" class="qcb" data-key="q12" onchange="renderAll()" /><span class="box"><i class="ti ti-check"></i></span></label>
+      <div class="qtext-wrap"><p class="qtag">다른 후보 · 지역+후기</p><p class="qtext">"강서구 치과 중 후기 좋은 곳은?"</p></div>
+      <button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>
+    </div>
+
+    <button class="add-row" onclick="openQModal()"><i class="ti ti-plus"></i>질문 직접 추가</button>
+
+    <div class="spacer"></div>
+    <div class="rule-box" style="margin: 0 0 16px;">
+      <i class="ti ti-lock"></i>
+      <p><strong>선택한 9개 질문을 6개 AI에게 반복해서 묻고,</strong> 어떤 브랜드가 등장하는지 확인해요. 시작한 뒤에는 질문을 바꿀 수 없어요.</p>
+    </div>
+
+    <div class="next-row">
+      <button class="next-btn" id="next-btn" onclick="openStartModal()">진단 시작하기 <i class="ti ti-arrow-right"></i></button>
+    </div>
+  </div>
+
+  <!-- 오른쪽 -->
+  <div class="preview-panel">
+    <div class="ripple"></div>
+    <div class="ripple r2"></div>
+    <div class="preview-inner">
+      <p class="pv-eyebrow"><span class="pv-livedot"></span>자리 질문 선택 중</p>
+      <p class="pv-title">AI는 이 자리에서<br>우리를 추천할까요?</p>
+      <p class="pv-sub">선택한 9개 질문을 6개 AI에게 반복해서 묻고,<br>어떤 브랜드가 등장하는지 확인할게요.</p>
+
+      <div class="pv-qlist" id="pv-qlist">
+        <div class="pv-qitem" style="animation-delay:0.08s;"><span class="num">1</span><span class="text">"강서구에서 임플란트 잘하는 치과는?"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.14s;"><span class="num">2</span><span class="text">"강서구 치과 추천해줘"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.20s;"><span class="num">3</span><span class="text">"강서구에서 치아교정 잘하는 치과는?"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.26s;"><span class="num">4</span><span class="text">"강서구 야간진료 치과 추천해줘"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.32s;"><span class="num">5</span><span class="text">"자체 기공소가 있는 임플란트 치과는?"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.38s;"><span class="num">6</span><span class="text">"전체 임플란트 잘하는 치과 추천해줘"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.44s;"><span class="num">7</span><span class="text">"강서구에서 정밀 보철 잘하는 치과는?"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.50s;"><span class="num">8</span><span class="text">"뼈이식이나 재수술이 필요한데 어느 임플란트 치과가 좋아?"</span></div>
+        <div class="pv-qitem" style="animation-delay:0.56s;"><span class="num">9</span><span class="text">"강서구 전문의 협진 치과 추천해줘"</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 질문 직접 추가 모달 -->
+<div id="q-modal" class="add-modal-overlay" onclick="if(event.target===this) closeQModal();">
+  <div class="add-modal-box">
+    <p class="add-modal-title">자리 질문 추가</p>
+    <input type="text" id="q-modal-input" class="add-modal-input" placeholder='예: "강서구 소아치과 추천해줘"' />
+    <div class="add-modal-actions">
+      <button class="add-modal-cancel" onclick="closeQModal()">취소</button>
+      <button class="add-modal-confirm" onclick="confirmQModal()">추가</button>
+    </div>
+  </div>
+</div>
+
+<!-- 진단 시작 확인 모달 -->
+<div id="start-modal" class="add-modal-overlay" onclick="if(event.target===this) closeStartModal();">
+  <div class="add-modal-box" style="max-width:420px;">
+    <p class="add-modal-title" style="font-size:17px; margin-bottom:12px;">이 질문들로 7일 진단을 시작할까요?</p>
+    <p style="font-size:13px; color:var(--text-secondary); line-height:1.65; margin:0 0 22px;">인지 질문 3개와 자리 질문 9개를 6개 AI에게 반복해서 물어봐요. 시작한 뒤에는 이번 질문을 바꿀 수 없어요.</p>
+    <div class="add-modal-actions">
+      <button class="add-modal-cancel" onclick="closeStartModal()">질문 다시 보기</button>
+      <button class="add-modal-confirm" onclick="window.location.href='ensl_diagnosis_progress.html'">진단 시작하기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var QUESTIONS = {
+  q1: '"강서구에서 임플란트 잘하는 치과는?"',
+  q2: '"강서구 치과 추천해줘"',
+  q3: '"강서구에서 치아교정 잘하는 치과는?"',
+  q4: '"강서구 야간진료 치과 추천해줘"',
+  q5: '"자체 기공소가 있는 임플란트 치과는?"',
+  q6: '"전체 임플란트 잘하는 치과 추천해줘"',
+  q7: '"강서구에서 정밀 보철 잘하는 치과는?"',
+  q8: '"뼈이식이나 재수술이 필요한데 어느 임플란트 치과가 좋아?"',
+  q9: '"강서구 전문의 협진 치과 추천해줘"',
+  q10: '"강서구에서 가격 합리적인 임플란트 치과는?"',
+  q11: '"주차 가능한 강서구 치과는?"',
+  q12: '"강서구 치과 중 후기 좋은 곳은?"'
+};
+var Q_ORDER = ['q1','q2','q3','q4','q5','q6','q7','q8','q9','q10','q11','q12'];
+
+var MAX_SELECT = 9;
+
+function renderAll() {
+  var checked = [];
+  Q_ORDER.forEach(function (key) {
+    var cb = document.querySelector('.qcb[data-key="' + key + '"]');
+    if (cb && cb.checked) checked.push(key);
+  });
+
+  var countEl = document.getElementById('q-count');
+  countEl.textContent = checked.length + ' / ' + MAX_SELECT + '개 선택됨';
+  countEl.style.color = checked.length === MAX_SELECT ? 'var(--text-brand)' : 'var(--text-muted)';
+
+  // 3개 다 채워졌으면 나머지 체크박스는 비활성화 (체크된 것만 계속 조작 가능)
+  var atLimit = checked.length >= MAX_SELECT;
+  Q_ORDER.forEach(function (key) {
+    var cb = document.querySelector('.qcb[data-key="' + key + '"]');
+    if (!cb) return;
+    var wrap = cb.closest('.q-check');
+    var shouldDisable = atLimit && !cb.checked;
+    wrap.classList.toggle('disabled', shouldDisable);
+  });
+
+  document.getElementById('next-btn').disabled = checked.length !== MAX_SELECT;
+
+  var listEl = document.getElementById('pv-qlist');
+  listEl.innerHTML = '';
+  checked.forEach(function (key, i) {
+    var item = document.createElement('div');
+    item.className = 'pv-qitem';
+    item.innerHTML = '<span class="num">' + (i + 1) + '</span><span class="text">' + QUESTIONS[key] + '</span>';
+    listEl.appendChild(item);
+  });
+}
+
+function deleteQRow(btn) {
+  var row = btn.closest('.q-row');
+  var cb = row.querySelector('.qcb');
+  if (cb && cb.dataset.key) delete QUESTIONS[cb.dataset.key];
+  row.remove();
+  renderAll();
+}
+
+function openStartModal() {
+  document.getElementById('start-modal').classList.add('open');
+}
+function closeStartModal() {
+  document.getElementById('start-modal').classList.remove('open');
+}
+
+function openQModal() {
+  document.getElementById('q-modal-input').value = '';
+  document.getElementById('q-modal').classList.add('open');
+  setTimeout(function () { document.getElementById('q-modal-input').focus(); }, 50);
+}
+function closeQModal() {
+  document.getElementById('q-modal').classList.remove('open');
+}
+var qSeq = 0;
+function confirmQModal() {
+  if (!document.getElementById('q-modal').classList.contains('open')) return;
+  var input = document.getElementById('q-modal-input');
+  var value = input.value.trim();
+  if (!value) { closeQModal(); return; }
+  var text = value.charAt(0) === '"' ? value : ('"' + value + '"');
+
+  var key = 'custom' + (qSeq++);
+  QUESTIONS[key] = text;
+  Q_ORDER.push(key);
+
+  var currentChecked = document.querySelectorAll('.qcb:checked').length;
+  var shouldCheck = currentChecked < MAX_SELECT;
+
+  var row = document.createElement('div');
+  row.className = 'q-row';
+  row.innerHTML =
+    '<label class="q-check"><input type="checkbox"' + (shouldCheck ? ' checked' : '') + ' class="qcb" data-key="' + key + '" onchange="renderAll()" />' +
+    '<span class="box"><i class="ti ti-check"></i></span></label>' +
+    '<div class="qtext-wrap"><p class="qtag">직접 추가</p><p class="qtext">' + text + '</p></div>' +
+    '<button class="del-btn" onclick="deleteQRow(this)"><i class="ti ti-x"></i></button>';
+
+  var addBtn = document.querySelector('.add-row');
+  addBtn.parentElement.insertBefore(row, addBtn);
+
+  renderAll();
+  closeQModal();
+}
+document.getElementById('q-modal-input').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') {
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    confirmQModal();
+  }
+  if (e.key === 'Escape') closeQModal();
+});
+renderAll();
+</script>
+
+</body>
+</html>

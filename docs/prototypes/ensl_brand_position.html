@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 브랜드 현 위치</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6;
+    --surface-1: #F1EFE8;
+    --surface-2: #FFFFFF;
+    --text-primary: #1A1A18;
+    --text-secondary: #5F5E5A;
+    --text-muted: #8A8880;
+    --border: #E6E4DC;
+    --border-strong: #D3D1C7;
+    --bg-success: #EAF3DE;
+    --text-success: #27500A;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--surface-0); color: var(--text-primary); line-height: 1.5; }
+  button { font-family: inherit; background: transparent; border: 0.5px solid var(--border-strong); color: var(--text-primary); cursor: pointer; border-radius: var(--radius); padding: 6px 12px; }
+  button:hover { background: var(--surface-1); }
+
+  .app-shell { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { width: 220px; flex-shrink: 0; background: var(--surface-2); border-right: 0.5px solid var(--border); padding: 1rem; display: flex; flex-direction: column; gap: 4px; }
+  .logo-row { display: flex; align-items: center; gap: 8px; padding: 8px 8px 16px; }
+  .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); flex-shrink: 0; }
+  .logo-text { font-size: 14px; font-weight: 500; }
+  .brand-box { padding: 8px; margin-bottom: 12px; background: var(--surface-1); border-radius: var(--radius); position: relative; cursor: pointer; }
+  .brand-box .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .brand-box .row i { font-size: 13px; color: var(--text-muted); flex-shrink: 0; transition: transform 0.15s; }
+  .brand-box.open .row i.ti-chevron-down { transform: rotate(180deg); }
+  .brand-dropdown { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface-2); border: 0.5px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(26,26,24,0.10); z-index: 30; overflow: hidden; cursor: default; }
+  .brand-box.open .brand-dropdown { display: block; }
+  .brand-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-size: 13px; color: var(--text-primary); }
+  .brand-item:hover { background: var(--surface-1); }
+  .brand-item.active { color: var(--text-brand); font-weight: 500; }
+  .brand-item i { font-size: 14px; color: var(--text-brand); }
+  .brand-add { display: flex; align-items: center; gap: 7px; padding: 10px 12px; font-size: 12.5px; color: var(--text-secondary); border-top: 0.5px solid var(--border); }
+  .brand-add:hover { background: var(--surface-1); color: var(--text-primary); }
+  .brand-add i { font-size: 13px; color: var(--text-secondary); }
+  .brand-box p { margin: 0; }
+  .brand-box .label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+  .brand-box .name { font-size: 13px; font-weight: 500; }
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav a { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: var(--radius); color: var(--text-secondary); text-decoration: none; font-size: 13px; }
+  nav a.active { background: var(--surface-1); color: var(--text-primary); font-weight: 500; }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 0.5px solid var(--border); background: var(--surface-2); }
+  .topbar .status { font-size: 13px; color: var(--text-secondary); }
+  .topbar .updated { color: var(--text-muted); font-size: 12px; }
+  .content { padding: 32px 40px; max-width: 780px; }
+
+  .eyebrow { font-size: 12px; color: var(--text-muted); letter-spacing: 0.02em; margin: 0 0 4px; }
+  h1 { font-size: 22px; font-weight: 500; margin: 0 0 10px; }
+  .meta-row { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin: 0 0 20px; }
+  .meta-row span { display: flex; align-items: center; gap: 5px; }
+  .meta-row i { font-size: 15px; }
+
+  /* Hero */
+  .hero { background: var(--surface-1); border-radius: 12px; padding: 2rem; }
+  .hero .sub-label { font-size: 13px; color: var(--text-secondary); margin: 0 0 10px; }
+  .hero .question { font-size: 26px; font-weight: 500; line-height: 1.5; margin: 0 0 16px; }
+  .rate-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-success); color: var(--text-success); font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 20px; }
+  .competition { border-top: 0.5px solid var(--border-strong); padding-top: 20px; margin-top: 24px; }
+  .competition .title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .competition .caption { font-size: 11px; color: var(--text-muted); margin: 0 0 14px; }
+  .competition .caption em { font-style: italic; }
+
+  .brand-row { background: var(--surface-2); border-radius: var(--radius); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
+  .brand-row .nm { font-size: 13px; font-weight: 500; margin: 0 0 2px; }
+  .brand-row .nm .ours { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .brand-row .ft { font-size: 11px; color: var(--text-muted); margin: 0; }
+  .brand-row .pc { font-size: 16px; font-weight: 500; margin: 0; }
+  .brand-row .pc.sec { color: var(--text-secondary); }
+  .brand-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+
+  .interpretation { background: var(--surface-2); border-radius: var(--radius); padding: 16px; }
+  .interpretation .k { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+  .interpretation .v { font-size: 14px; line-height: 1.6; margin: 0; }
+
+  h2.section-title { font-size: 18px; font-weight: 500; margin: 32px 0 4px; }
+  .section-sub { font-size: 12px; color: var(--text-muted); margin: 0 0 16px; }
+
+  /* Question list */
+  .qlist { display: flex; flex-direction: column; }
+  .qitem:last-child { border-bottom: 0.5px solid var(--border); }
+  .qhead { padding: 16px 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; border-top: 0.5px solid var(--border); }
+  .qhead .qtext { font-size: 15px; font-weight: 500; margin: 0 0 6px; }
+  .qhead .aux { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 10px; border-radius: 20px; }
+  .badge.strong { background: var(--bg-success); color: var(--text-success); }
+  .badge.sometimes { background: var(--border); border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
+  .badge.none { border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
+  .badge.insufficient { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); }
+  .row-tail { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .stat-col { width: 72px; flex-shrink: 0; text-align: right; }
+  .stat-col .pct { font-size: 24px; font-weight: 500; margin: 0; line-height: 1; }
+  .stat-col .pct.muted { color: var(--text-muted); }
+  .stat-col .frac { font-size: 11px; color: var(--text-muted); margin: 2px 0 0; }
+  .chev { font-size: 14px; color: var(--text-muted); }
+
+  .qdetail { display: none; padding: 0 4px 20px; }
+  .qdetail .lbl { font-size: 12px; color: var(--text-muted); margin: 0 0 4px; }
+  .qdetail .cap { font-size: 11px; color: var(--text-muted); font-style: italic; margin: 0 0 10px; }
+  .qdetail .brand-list-sm { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .evidence-box { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .evidence-box .src { font-size: 12px; color: var(--text-muted); margin: 0 0 6px; }
+  .evidence-box .quote { font-size: 13px; line-height: 1.6; margin: 0 0 10px; }
+  .evidence-box button { font-size: 12px; width: 100%; }
+  .note { font-size: 12px; color: var(--text-muted); margin: 0; }
+
+  /* ============================================
+     엔슬의 팁 박스 (Ensl Tip Box)
+     — 모든 화면 하단에 공통으로 쓰는 컴포넌트.
+       재사용 시 .tip-title / .tip-desc / .tip-btn
+       텍스트만 바꾸면 됨. 구조·클래스는 고정.
+     ============================================ */
+  .tip-box { margin: 52px 0 0; border: 0.5px solid var(--border-strong); border-radius: 12px; background: transparent; padding: 24px 26px; }
+  .tip-badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-muted); border: 0.5px solid var(--border-strong); border-radius: 4px; padding: 2px 7px; margin: 0 0 14px; }
+  .tip-title { font-size: 19px; font-weight: 500; color: var(--text-primary); margin: 0 0 8px; line-height: 1.45; }
+  .tip-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 16px; }
+  .tip-btn {
+    font-size: 13px; padding: 0; border: none; background: transparent;
+    color: var(--text-primary); font-weight: 500; display: inline-flex;
+    align-items: center; gap: 6px; border-bottom: 1px solid var(--border-strong);
+    border-radius: 0; padding-bottom: 3px; transition: border-color 0.2s;
+  }
+  .tip-btn:hover { background: transparent; border-bottom-color: var(--text-primary); }
+  .tip-arrow { display: inline-block; transition: transform 0.2s ease; font-size: 12px; }
+  .tip-btn:hover .tip-arrow { transform: translate(2px, -2px); }
+
+  /* 완료 마침표 */
+  .done-cta { margin-top: 32px; padding-top: 32px; border-top: 0.5px solid var(--border-strong); }
+  .done-title { font-size: 19px; font-weight: 500; line-height: 1.55; margin: 0 0 20px; }
+  .done-btn { font-size: 13.5px; font-weight: 500; padding: 11px 20px; background: var(--text-primary); color: var(--surface-2); border: none; border-radius: var(--radius); display: inline-flex; align-items: center; gap: 7px; }
+  .done-btn:hover { background: #000; }
+  .done-arrow { transition: transform 0.2s ease; display: inline-block; }
+  .done-btn:hover .done-arrow { transform: translateX(3px); }
+
+  /* 모달 시각 요소 */
+  .modal-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--bg-success); color: var(--text-success); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+  .modal-tip { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+  .mt-num { width: 22px; height: 22px; border-radius: 50%; border: 0.5px solid var(--border-strong); color: var(--text-muted); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; flex-shrink: 0; margin-top: 1px; }
+  .mt-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .mt-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+
+  .modal-closing { background: var(--surface-1); border-radius: var(--radius); padding: 14px 16px; border-top: 2px solid var(--text-primary); display: flex; gap: 12px; align-items: flex-start; }
+  .mc-icon { width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); color: var(--text-primary); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .mc-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .mc-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="logo-row"><div class="logo-mark"></div><span class="logo-text">ensl</span></div>
+    <div class="brand-box" id="brand-box" onclick="toggleBrandDropdown(event)">
+      <p class="label">진단 중인 브랜드</p>
+      <div class="row"><p class="name">365서울원탑치과</p><i class="ti ti-chevron-down"></i></div>
+      <div class="brand-dropdown">
+        <div class="brand-item active">365서울원탑치과<i class="ti ti-check"></i></div>
+        <div class="brand-add" onclick="window.location.href='ensl_onboarding_step1.html'"><i class="ti ti-plus"></i>새 브랜드 추가</div>
+      </div>
+    </div>
+    <nav>
+      <a href="ensl_brand_awareness.html">브랜드 인지</a>
+      <a href="ensl_brand_position.html" class="active">브랜드 현 위치</a>
+      <a href="ensl_gap_screen.html">인지와 위치의 간극</a>
+      <a href="ensl_trend_screen.html">변화 추이</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="status">진단 7일차 · 7일 중</span>
+      <span class="updated">18:00 기준 업데이트</span>
+    </div>
+
+    <div class="content">
+      <p class="eyebrow">브랜드 현 위치</p>
+      <h1>우리 브랜드는 어떤 자리 질문에서 등장하고 있나?</h1>
+      <p class="meta-row">
+        <span><i class="ti ti-robot"></i>AI 6개</span>
+        <span><i class="ti ti-target-arrow"></i>자리 질문 9개</span>
+        <span><i class="ti ti-circle-check"></i>7일 관측 완료</span>
+      </p>
+
+      <!-- Hero -->
+      <div class="hero">
+        <p class="sub-label">가장 강하게 등장한 자리 질문</p>
+        <p class="question">"강서구에서 임플란트 잘하는 치과 추천해줘"</p>
+        <span class="rate-badge">등장률 75% · 24회 중 18회 등장</span>
+
+        <div class="competition">
+          <p class="title">이 자리에서 함께 등장한 브랜드</p>
+          <p class="caption">AI가 함께 언급한 특징 · <em>합성 데이터로 검증됨, 실제 데이터 검증 예정</em></p>
+          <div class="brand-list">
+            <div class="brand-row"><div><p class="nm">365서울원탑치과 <span class="ours">(우리)</span></p><p class="ft">고난도 임플란트 · 전문의 협진</p></div><p class="pc">75%</p></div>
+            <div class="brand-row"><div><p class="nm">강서○○치과</p><p class="ft">지역 접근성 · 야간 진료</p></div><p class="pc sec">62%</p></div>
+            <div class="brand-row"><div><p class="nm">○○플란트치과</p><p class="ft">자체 기공소 · 임플란트 전문</p></div><p class="pc sec">46%</p></div>
+          </div>
+          <div class="interpretation">
+            <p class="k">이 자리에서 브랜드들이 기억되는 방식</p>
+            <p class="v">365서울원탑치과는 '고난도 치료'라는 표현과 함께 등장하고, 경쟁 브랜드는 '접근성', '자체 기공소'라는 다른 표현과 함께 등장하고 있어요. 어떤 표현이 실제 선택으로 이어지는지는 아직 확인하지 못했어요.</p>
+          </div>
+
+          <button id="hero-evi-btn" style="margin-top:14px; font-size:13px;" onclick="tglHero(this)">이 자리의 실제 근거 보기 →</button>
+          <div id="hero-evidence" style="display:none; margin-top:12px;">
+            <div class="evidence-box" style="background:var(--surface-2);">
+              <p class="src">실제 근거 · Perplexity · 8월 24일 · 출처: 네이버 플레이스, 병원 홈페이지</p>
+              <p class="quote">"강서구에서 전체 임플란트를 고려한다면 고난도 수술 경험과 자체 기공 시스템을 갖춘 365서울원탑치과를 함께 살펴볼 수 있습니다. 이 외에 강서○○치과, ○○플란트치과도 자주 언급됩니다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size:13px; color:var(--text-muted); margin:32px 0 6px;">전체 자리 질문을 보면</p>
+      <p style="font-size:16px; line-height:1.6; margin:0 0 28px;">'강서구 임플란트 추천'과 '자체 기공소'에서는 강하게 등장하고, '전문 치과 추천'에서는 아직 등장하지 않았어요.</p>
+
+      <h2 class="section-title" style="margin-top:0;">나머지 자리 질문</h2>
+      <p class="section-sub">가장 강한 질문 하나는 위에서 먼저 보여드렸어요. 나머지 8개 질문을 등장률 높은 순으로 정리했어요.</p>
+
+      <div class="qlist">
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">강서구 치과 중에 친절한 곳 추천해줘</p><span class="badge strong">강하게 등장</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct">70%</p><p class="frac">20회 중 14회</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="lbl">이 질문에서 함께 등장한 브랜드</p>
+            <p class="cap">AI가 함께 언급한 특징</p>
+            <div class="brand-list-sm">
+              <div class="brand-row"><div><p class="nm">365서울원탑치과 <span class="ours">(우리)</span></p><p class="ft">편안한 분위기 · 친절한 상담</p></div><p class="pc">70%</p></div>
+            </div>
+            <div class="evidence-box">
+              <p class="src">실제 근거 · 네이버 AI 브리핑 · 8월 23일</p>
+              <p class="quote">"환자 후기에서 편안한 분위기와 친절한 상담이 자주 언급되는 곳으로 365서울원탑치과가 꼽힌다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">자체 기공소가 있는 임플란트 치과는?</p><span class="badge strong">강하게 등장</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct">64%</p><p class="frac">31회 중 20회</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="lbl">이 질문에서 함께 등장한 브랜드</p>
+            <p class="cap">AI가 함께 언급한 특징</p>
+            <div class="brand-list-sm">
+              <div class="brand-row"><div><p class="nm">365서울원탑치과 <span class="ours">(우리)</span></p><p class="ft">자체 기공 시스템 · 제작기간 단축</p></div><p class="pc">64%</p></div>
+              <div class="brand-row"><div><p class="nm">강남365치과</p><p class="ft">신속 진료 · 당일 보철</p></div><p class="pc sec">55%</p></div>
+            </div>
+            <div class="evidence-box">
+              <p class="src">실제 근거 · ChatGPT · 8월 25일</p>
+              <p class="quote">"자체 기공소를 운영하는 치과로는 365서울원탑치과가 있으며, 보철물 제작 기간을 단축할 수 있다는 장점이 있다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">임플란트 부작용 걱정 없는 치과 어디야?</p><span class="badge sometimes">가끔 등장</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct">45%</p><p class="frac">20회 중 9회</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="lbl">이 질문에서 함께 등장한 브랜드</p>
+            <p class="cap">AI가 함께 언급한 특징</p>
+            <div class="brand-list-sm">
+              <div class="brand-row"><div><p class="nm">365서울원탑치과 <span class="ours">(우리)</span></p><p class="ft">정기 검진 체계</p></div><p class="pc">45%</p></div>
+              <div class="brand-row"><div><p class="nm">강남365치과</p><p class="ft">사후관리 보증제</p></div><p class="pc sec">40%</p></div>
+            </div>
+            <div class="evidence-box">
+              <p class="src">실제 근거 · Claude · 8월 21일</p>
+              <p class="quote">"부작용 관리를 중요하게 보는 환자라면 정기 검진 체계를 갖춘 365서울원탑치과를 고려할 수 있다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">고난도 임플란트를 잘하는 치과는?</p><span class="badge sometimes">가끔 등장</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct">38%</p><p class="frac">34회 중 13회</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="lbl">이 질문에서 함께 등장한 브랜드</p>
+            <p class="cap">AI가 함께 언급한 특징</p>
+            <div class="brand-list-sm">
+              <div class="brand-row"><div><p class="nm">서울탑치과병원</p><p class="ft">대학병원급 협진 · 중증 케이스</p></div><p class="pc">72%</p></div>
+              <div class="brand-row"><div><p class="nm">365서울원탑치과 <span class="ours">(우리)</span></p><p class="ft">고난도 임플란트 경험</p></div><p class="pc sec">38%</p></div>
+            </div>
+            <div class="evidence-box">
+              <p class="src">실제 근거 · Perplexity · 8월 22일</p>
+              <p class="quote">"고난도 임플란트는 서울탑치과병원이 대표적으로 언급되며, 365서울원탑치과도 일부 답변에서 함께 다뤄진다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">강서구에 있는 전문 치과 추천해줘</p><span class="badge none">아직 등장하지 않음</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct">0%</p><p class="frac">30회 중 0회</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="lbl">이 질문에서 대신 등장한 브랜드</p>
+            <p class="cap">AI가 함께 언급한 특징</p>
+            <div class="brand-row"><div><p class="nm">○○전문치과</p><p class="ft">단일 진료과 특화</p></div><p class="pc">83%</p></div>
+          </div>
+        </div>
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">치과 대기시간 적은 곳 어디야?</p><span class="badge none">아직 등장하지 않음</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct">0%</p><p class="frac">22회 중 0회</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="lbl">이 질문에서 대신 등장한 브랜드</p>
+            <p class="cap">AI가 함께 언급한 특징</p>
+            <div class="brand-row"><div><p class="nm">강남365치과</p><p class="ft">예약제 운영</p></div><p class="pc">80%</p></div>
+          </div>
+        </div>
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">강서구에서 야간 진료하는 치과는? <span class="aux">(보조 질문)</span></p><span class="badge insufficient">판단할 데이터가 부족함</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct muted">—</p><p class="frac">6회 중 기준 미달</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="note">보조 질문은 하루 1회만 관측돼서, 판단을 내리려면 아직 더 쌓여야 해요. 최소 기준을 채우면 다른 질문처럼 상태가 표시돼요.</p>
+          </div>
+        </div>
+
+        <div class="qitem">
+          <div class="qhead" onclick="tgl(this)">
+            <div style="flex:1; min-width:0;"><p class="qtext">당일 임플란트 가능한 치과 있어? <span class="aux">(보조 질문)</span></p><span class="badge insufficient">판단할 데이터가 부족함</span></div>
+            <div class="row-tail"><div class="stat-col"><p class="pct muted">—</p><p class="frac">4회 중 기준 미달</p></div><span class="chev">▾</span></div>
+          </div>
+          <div class="qdetail">
+            <p class="note">보조 질문은 하루 1회만 관측돼서, 판단을 내리려면 아직 더 쌓여야 해요.</p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 엔슬의 팁 박스 -->
+      <div class="tip-box">
+        <span class="tip-badge">TIP</span>
+        <p class="tip-title">질문이 달라지면, 자리도 달라져요.</p>
+        <p class="tip-desc">이번 진단에서 365서울원탑치과는 '강서구에서 임플란트 잘하는 치과'에서는 가장 자주 등장했지만, '강서구에 있는 전문 치과'에서는 아직 등장하지 않았어요. 어떤 질문을 관찰하느냐에 따라 브랜드의 강점과 빈자리가 다르게 보여요.</p>
+        <button class="tip-btn" id="tips-btn" onclick="openTips()">좋은 자리 질문 만드는 법 <span class="tip-arrow">↗</span></button>
+      </div>
+
+      <!-- 완료 마침표: 다음 화면 이동 -->
+      <div class="done-cta">
+        <p class="done-title">365서울원탑치과의 자리를 확인했어요.<br>다음은 왜 선택되는지 볼 차례예요.</p>
+        <button class="done-btn" onclick="window.location.href='ensl_gap_screen.html'">인지와 위치의 간극 보기 <span class="done-arrow">→</span></button>
+      </div>
+    </div>
+
+    <!-- Tips Modal -->
+    <div id="tips-modal" style="display:none; position:fixed; inset:0; background:rgba(26,26,24,0.4); z-index:50; align-items:center; justify-content:center; padding:20px;" onclick="if(event.target===this) closeTips();">
+      <div style="background:var(--surface-2); border-radius:12px; max-width:520px; width:100%; max-height:80vh; overflow-y:auto; padding:28px;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:22px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span class="modal-mark"><i class="ti ti-bulb"></i></span>
+            <h2 style="font-size:19px; font-weight:500; margin:0;">좋은 자리 질문은 어떻게 만들까?</h2>
+          </div>
+          <button onclick="closeTips()" style="border:none; padding:4px; font-size:18px; line-height:1; color:var(--text-muted);">✕</button>
+        </div>
+
+        <div class="modal-tip">
+          <span class="mt-num">1</span>
+          <div>
+            <p class="mt-title">고객이 실제로 묻는 말로 쓰기</p>
+            <p class="mt-desc">'임플란트 의료기관 경쟁력'보다 '강서구에서 임플란트 잘하는 치과는?'처럼 실제 대화에서 사용할 법한 문장이 좋아요.</p>
+          </div>
+        </div>
+        <div class="modal-tip">
+          <span class="mt-num">2</span>
+          <div>
+            <p class="mt-title">한 질문에는 하나의 상황만 담기</p>
+            <p class="mt-desc">'가격이 합리적이고 야간 진료도 하며 임플란트도 잘하는 치과'처럼 여러 조건을 한꺼번에 넣으면 무엇 때문에 등장했는지 해석하기 어려워요.</p>
+          </div>
+        </div>
+        <div class="modal-tip">
+          <span class="mt-num">3</span>
+          <div>
+            <p class="mt-title">넓은 질문과 구체적인 질문을 함께 보기</p>
+            <p class="mt-desc">'강서구 치과 추천해줘'처럼 넓은 질문과 '자체 기공소가 있는 임플란트 치과는?'처럼 구체적인 질문을 함께 관찰하면 브랜드가 어느 범위에서 강한지 확인할 수 있어요.</p>
+          </div>
+        </div>
+        <div class="modal-tip" style="margin-bottom:20px;">
+          <span class="mt-num">4</span>
+          <div>
+            <p class="mt-title">질문 안에 브랜드 이름을 넣지 않기</p>
+            <p class="mt-desc">'365서울원탑치과는 임플란트를 잘해?'는 브랜드에 대한 인지를 묻는 질문이에요. 자리 질문은 브랜드 이름 없이 물어야, 실제 추천 상황에서 등장하는지 확인할 수 있어요.</p>
+          </div>
+        </div>
+
+        <div class="modal-closing">
+          <span class="mc-icon"><i class="ti ti-refresh"></i></span>
+          <div>
+            <p class="mc-title">같은 질문을 유지해야 변화가 보여요</p>
+            <p class="mc-desc">진단마다 질문을 바꾸면 이전 결과와 직접 비교하기 어려워요. 질문을 수정했다면 <strong style="color:var(--text-primary);">새로운 비교 기준으로 기록</strong>하고, 같은 조건으로 다시 관찰해야 해요.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openTips() {
+  document.getElementById('tips-modal').style.display = 'flex';
+}
+function closeTips() {
+  document.getElementById('tips-modal').style.display = 'none';
+}
+function tglHero(btn) {
+  var d = document.getElementById('hero-evidence');
+  var open = d.style.display === 'block';
+  d.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? '이 자리의 실제 근거 보기 →' : '근거 접기 ↑';
+}
+function tgl(head) {
+  var d = head.nextElementSibling;
+  var open = d.style.display === 'block';
+  d.style.display = open ? 'none' : 'block';
+  var c = head.querySelector('.chev');
+  if (c) c.textContent = open ? '▾' : '▴';
+}
+</script>
+
+
+<script>
+function toggleBrandDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('brand-box').classList.toggle('open');
+}
+document.addEventListener('click', function () {
+  var box = document.getElementById('brand-box');
+  if (box) box.classList.remove('open');
+});
+</script>
+</body>
+</html>

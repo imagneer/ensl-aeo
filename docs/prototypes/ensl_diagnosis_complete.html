@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 진단 완료</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6; --surface-2: #FFFFFF;
+    --text-primary: #1A1A18; --text-secondary: #5F5E5A; --text-muted: #8A8880;
+    --border-strong: #D3D1C7;
+    --brand: #00A4B8;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--text-primary); color: #fff; line-height: 1.5; }
+
+  .stage { min-height: 100vh; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; padding: 40px; }
+
+  .ripple { position: absolute; top: 50%; left: 50%; border: 0.5px solid rgba(0,164,184,0.35); border-radius: 50%; width: 40px; height: 40px; transform: translate(-50%,-50%) scale(1); opacity: 0; animation: ripple 6s ease-out infinite; pointer-events: none; }
+  .ripple.r2 { animation-delay: 2s; }
+  .ripple.r3 { animation-delay: 4s; }
+  @keyframes ripple {
+    0% { transform: translate(-50%,-50%) scale(1); opacity: 0.18; }
+    60% { opacity: 0.06; }
+    100% { transform: translate(-50%,-50%) scale(26); opacity: 0; }
+  }
+
+  .inner { max-width: 560px; text-align: center; position: relative; z-index: 1; }
+
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .fi { opacity: 0; animation: fadeInUp 0.7s ease-out forwards; }
+
+  .badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: rgba(255,255,255,0.6); border: 0.5px solid rgba(255,255,255,0.2); border-radius: 20px; padding: 6px 14px; margin-bottom: 28px; }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+
+  h1 { font-size: 34px; font-weight: 500; line-height: 1.4; margin: 0 0 16px; letter-spacing: -0.01em; }
+  .sub { font-size: 15px; color: rgba(255,255,255,0.55); line-height: 1.7; margin: 0 0 44px; }
+
+  .stat-row { display: flex; justify-content: center; gap: 14px; margin-bottom: 44px; }
+  .stat { background: rgba(255,255,255,0.06); border-radius: 12px; padding: 18px 22px; min-width: 120px; }
+  .stat .v { font-size: 24px; font-weight: 500; color: #fff; margin: 0 0 4px; }
+  .stat .k { font-size: 11.5px; color: rgba(255,255,255,0.45); margin: 0; }
+
+  .go-btn { font-size: 14.5px; font-weight: 500; padding: 14px 28px; background: #fff; color: var(--text-primary); border: none; border-radius: var(--radius); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .go-btn:hover { background: rgba(255,255,255,0.9); }
+  .go-btn i { transition: transform 0.2s ease; }
+  .go-btn:hover i { transform: translateX(3px); }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="ripple"></div>
+  <div class="ripple r2"></div>
+  <div class="ripple r3"></div>
+
+  <div class="inner">
+    <p class="badge fi" style="animation-delay:0s;"><span class="dot"></span>7일 진단 완료</p>
+    <h1 class="fi" style="animation-delay:0.1s;">365서울원탑치과의<br>첫 진단이 끝났어요.</h1>
+    <p class="sub fi" style="animation-delay:0.2s;">AI가 브랜드를 어떻게 기억하는지, 어떤 자리에서 등장하는지,<br>7일 동안 모은 답변으로 확인해볼 수 있어요.</p>
+
+    <div class="stat-row fi" style="animation-delay:0.3s;">
+      <div class="stat">
+        <p class="v">504</p>
+        <p class="k">수집된 응답</p>
+      </div>
+      <div class="stat">
+        <p class="v">12</p>
+        <p class="k">관측 질문</p>
+      </div>
+      <div class="stat">
+        <p class="v">6</p>
+        <p class="k">관측 AI</p>
+      </div>
+    </div>
+
+    <button class="go-btn fi" style="animation-delay:0.4s;" onclick="window.location.href='ensl_brand_awareness.html'">첫 진단 결과 보기 <i class="ti ti-arrow-right"></i></button>
+  </div>
+</div>
+
+</body>
+</html>

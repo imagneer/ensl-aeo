@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 변화 추이</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6; --surface-1: #F1EFE8; --surface-2: #FFFFFF;
+    --text-primary: #1A1A18; --text-secondary: #5F5E5A; --text-muted: #8A8880;
+    --border: #E6E4DC; --border-strong: #D3D1C7;
+    --bg-success: #EAF3DE; --text-success: #27500A;
+    --bg-warning: #FBF0DC; --text-warning: #7A4B08;
+    --line-1: #27500A; --line-2: #8A8880; --line-3: #B8783B;
+    --line-q1: #27500A; --line-q2: #5F5E5A; --line-q3: #B8783B; --line-q4: #A9A497;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--surface-0); color: var(--text-primary); line-height: 1.5; }
+  button { font-family: inherit; background: transparent; border: 0.5px solid var(--border-strong); color: var(--text-primary); cursor: pointer; border-radius: var(--radius); padding: 6px 12px; }
+  button:hover { background: var(--surface-1); }
+
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 220px; flex-shrink: 0; background: var(--surface-2); border-right: 0.5px solid var(--border); padding: 1rem; display: flex; flex-direction: column; gap: 4px; }
+  .logo-row { display: flex; align-items: center; gap: 8px; padding: 8px 8px 16px; }
+  .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); flex-shrink: 0; }
+  .logo-text { font-size: 14px; font-weight: 500; }
+  .brand-box { padding: 8px; margin-bottom: 12px; background: var(--surface-1); border-radius: var(--radius); position: relative; cursor: pointer; }
+  .brand-box .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .brand-box .row i { font-size: 13px; color: var(--text-muted); flex-shrink: 0; transition: transform 0.15s; }
+  .brand-box.open .row i.ti-chevron-down { transform: rotate(180deg); }
+  .brand-dropdown { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface-2); border: 0.5px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(26,26,24,0.10); z-index: 30; overflow: hidden; cursor: default; }
+  .brand-box.open .brand-dropdown { display: block; }
+  .brand-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-size: 13px; color: var(--text-primary); }
+  .brand-item:hover { background: var(--surface-1); }
+  .brand-item.active { color: var(--text-brand); font-weight: 500; }
+  .brand-item i { font-size: 14px; color: var(--text-brand); }
+  .brand-add { display: flex; align-items: center; gap: 7px; padding: 10px 12px; font-size: 12.5px; color: var(--text-secondary); border-top: 0.5px solid var(--border); }
+  .brand-add:hover { background: var(--surface-1); color: var(--text-primary); }
+  .brand-add i { font-size: 13px; color: var(--text-secondary); }
+  .brand-box p { margin: 0; }
+  .brand-box .label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+  .brand-box .name { font-size: 13px; font-weight: 500; }
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav a { display: flex; padding: 8px 9px; border-radius: var(--radius); color: var(--text-secondary); text-decoration: none; font-size: 13px; }
+  nav a.active { background: var(--surface-1); color: var(--text-primary); font-weight: 500; }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 0.5px solid var(--border); background: var(--surface-2); }
+  .topbar .status { font-size: 13px; color: var(--text-secondary); }
+  .topbar .updated { color: var(--text-muted); font-size: 12px; }
+  .content { padding: 28px 40px 60px; max-width: 860px; }
+
+  .eyebrow-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .eyebrow { font-size: 12px; color: var(--text-muted); }
+  .approved-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-success); background: var(--bg-success); padding: 2px 9px; border-radius: 20px; }
+  h1 { font-size: 24px; font-weight: 500; margin: 0 0 10px; line-height: 1.4; }
+  .meta-row { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin: 0 0 20px; }
+  .meta-row span { display: flex; align-items: center; gap: 5px; }
+  .meta-row i { font-size: 15px; }
+
+  /* 비교 기준 바 */
+  .basis-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); margin: 0 0 28px; }
+  .basis-line b { color: var(--text-secondary); font-weight: 500; }
+  .basis-line i { color: var(--text-success); font-size: 13px; }
+  .basis-line .sep { color: var(--border-strong); }
+
+  /* Hero */
+  .hero { background: var(--surface-1); border-radius: 12px; padding: 2rem; margin-bottom: 36px; }
+  .hero .sub-label { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
+  .hero .sentence { font-size: 20px; font-weight: 500; line-height: 1.65; margin: 0 0 24px; }
+  .hero .sentence b { font-weight: 700; }
+  .split { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; }
+  .split-box { background: var(--surface-2); border-radius: var(--radius); padding: 18px; }
+  .split-box .k { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+  .split-box .v { font-size: 19px; font-weight: 500; margin: 0 0 6px; line-height: 1.35; }
+  .split-box .d { font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .connector { text-align: center; }
+  .connector .line { border-top: 1px dashed var(--border-strong); width: 60px; margin: 0 auto 8px; }
+  .connector .tag { font-size: 11px; color: var(--text-success); background: var(--bg-success); padding: 3px 10px; border-radius: 20px; white-space: nowrap; }
+
+  h2.sec { font-size: 18px; font-weight: 500; margin: 0 0 4px; }
+  .sec-sub { font-size: 12px; color: var(--text-muted); margin: 0 0 16px; }
+  section { margin-bottom: 40px; }
+  .sub-h { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin: 30px 0 14px; display: flex; align-items: center; gap: 6px; }
+
+  /* 차트 카드 */
+  .chart-card { background: var(--surface-2); border: 0.5px solid var(--border); border-radius: 12px; padding: 20px 22px 16px; }
+  .chart-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+  .leg-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+  .leg-item.off { opacity: 0.35; }
+  .leg-swatch { width: 14px; height: 3px; border-radius: 2px; }
+  .leg-item input { display: none; }
+  .chart-svg-wrap { overflow-x: auto; }
+  .chart-svg-wrap svg { display: block; }
+  .gridline { stroke: var(--border); stroke-width: 1; }
+  .axis-label { font-size: 10px; fill: var(--text-muted); font-family: var(--font-sans); }
+  .day-label { font-size: 10.5px; fill: var(--text-secondary); font-family: var(--font-sans); }
+  .chart-line { fill: none; stroke-width: 2.4; }
+  .chart-point { cursor: pointer; stroke: var(--surface-2); stroke-width: 2; }
+  .chart-read { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 14px 0 0; padding-top: 14px; border-top: 0.5px solid var(--border); }
+
+  .graph-evidence { display: none; border: 0.5px solid var(--border-strong); border-radius: 12px; padding: 18px 20px; margin-top: 14px; opacity: 0; transition: opacity 0.2s; }
+  .graph-evidence.show { display: block; }
+  .graph-evidence.show.in { opacity: 1; }
+  .graph-hint { font-size: 12px; color: var(--text-muted); margin: 14px 0 0; display: flex; align-items: center; gap: 5px; }
+  .graph-evidence .ge-top { margin-bottom: 12px; }
+  .graph-evidence .ge-eyebrow { font-size: 11px; color: var(--text-muted); margin: 0 0 3px; }
+  .graph-evidence .ge-day { font-size: 15px; font-weight: 500; margin: 0; }
+  .ge-quote-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 4px; }
+  .ge-quote-grid.two { grid-template-columns: 1fr 1fr; }
+  .ge-card { background: var(--surface-1); border-radius: var(--radius); padding: 13px 15px; }
+  .ge-card .t { font-size: 11px; color: var(--text-muted); margin: 0 0 7px; }
+  .ge-card .q { font-size: 13px; line-height: 1.6; margin: 0 0 7px; }
+  .ge-card .s { font-size: 11px; color: var(--text-muted); margin: 0; }
+  .ge-note { background: var(--bg-warning); border-left: 2px solid var(--text-warning); border-radius: 0 var(--radius) var(--radius) 0; padding: 10px 14px; margin-top: 12px; font-size: 12px; color: var(--text-warning); line-height: 1.6; }
+  .ge-note.ok { background: var(--bg-success); border-left-color: var(--text-success); color: var(--text-success); }
+
+  /* 문장 대조 */
+  .sd-card { border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+  .sd-item { padding: 16px 18px; background: var(--surface-2); }
+  .sd-item + .sd-item { border-top: 0.5px solid var(--border); }
+  .sd-tag { display: inline-flex; font-size: 11px; color: var(--text-muted); background: var(--surface-1); padding: 2px 9px; border-radius: 20px; margin-bottom: 9px; }
+  .sd-item.now .sd-tag { color: var(--text-success); background: var(--bg-success); }
+  .sd-item p.sd-txt { font-size: 14px; line-height: 1.7; margin: 0; }
+  .sd-item.prev p.sd-txt { color: var(--text-secondary); }
+
+  .feat-card { border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 18px; }
+  .feat-row { display: flex; align-items: center; gap: 12px; padding: 12px 18px; background: var(--surface-2); }
+  .feat-row + .feat-row { border-top: 0.5px solid var(--border); }
+  .feat-row .fdot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .feat-row .fdot.kept { background: var(--text-muted); }
+  .feat-row .fdot.new { background: var(--text-success); }
+  .feat-row .fdot.weak { background: var(--text-warning); }
+  .feat-row .flabel { font-size: 11px; color: var(--text-muted); width: 68px; flex-shrink: 0; line-height: 1.4; }
+  .feat-row .ftext { font-size: 13px; line-height: 1.5; }
+  .feat-row .ftext.new-t { color: var(--text-success); font-weight: 500; }
+  .feat-row .ftext.weak-t { color: var(--text-warning); }
+  .feat-row .ftext .sub { color: var(--text-muted); font-weight: 400; }
+  mark.gain { background: var(--bg-success); color: var(--text-success); padding: 1px 4px; border-radius: 3px; font-weight: 500; }
+  mark.lose { background: var(--surface-1); color: var(--text-muted); padding: 1px 4px; border-radius: 3px; border-bottom: 1.5px dotted var(--text-muted); }
+
+  .why-box { background: var(--surface-1); border-left: 2px solid var(--text-primary); border-radius: 0 var(--radius) var(--radius) 0; padding: 16px 18px; }
+  .why-box .k { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; }
+  .why-box ul { margin: 0; padding-left: 16px; }
+  .why-box li { font-size: 13px; color: var(--text-secondary); line-height: 1.65; margin-bottom: 6px; }
+  .why-box li:last-child { margin-bottom: 0; }
+  .why-box .guess-tag { font-size: 10px; color: var(--text-muted); font-weight: 400; }
+
+  /* 자리 질문 리스트 */
+  .flist { display: flex; flex-direction: column; border-top: 0.5px solid var(--border); }
+  .frow { padding: 15px 4px; display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; border-bottom: 0.5px solid var(--border); }
+  .frow.selected { background: var(--surface-1); margin: 0 -16px; padding-left: 20px; padding-right: 20px; border-radius: var(--radius); border-bottom-color: transparent; }
+  .frow .fname { font-size: 15px; font-weight: 500; margin: 0 0 4px; }
+  .frow .fsub { font-size: 12px; color: var(--text-muted); margin: 0; }
+  .frow .right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .pill { font-size: 12px; font-weight: 500; padding: 4px 12px; border-radius: 20px; white-space: nowrap; }
+  .pill.rise { background: var(--bg-success); color: var(--text-success); }
+  .pill.start { border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
+  .pill.fall { background: var(--bg-warning); color: var(--text-warning); }
+  .pill.comp { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); }
+  .chev { color: var(--text-muted); font-size: 14px; }
+
+  .detail-panel { border: 0.5px solid var(--border-strong); border-radius: 12px; padding: 24px; margin-top: 24px; }
+  .detail-panel .dp-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .detail-panel .dp-eyebrow { font-size: 11px; color: var(--text-muted); margin: 0 0 4px; }
+  .detail-panel .dp-name { font-size: 20px; font-weight: 500; margin: 0; }
+  .dp-track { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .dp-track .tbox { flex: 1; background: var(--surface-1); border-radius: var(--radius); padding: 14px; }
+  .dp-track .tbox .k { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+  .dp-track .tbox .v { font-size: 20px; font-weight: 500; margin: 0; }
+  .dp-track .tarrow { color: var(--text-muted); font-size: 18px; }
+  .dp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .dp-card { background: var(--surface-1); border-radius: var(--radius); padding: 14px; }
+  .dp-card .t { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; }
+  .dp-card .q { font-size: 13px; line-height: 1.6; margin: 0 0 8px; }
+  .dp-card .s { font-size: 11px; color: var(--text-muted); margin: 0; }
+  .dp-fact { background: var(--surface-1); border-left: 2px solid var(--text-primary); border-radius: 0 var(--radius) var(--radius) 0; padding: 12px 16px; }
+  .dp-fact .t { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+  .dp-fact .v { font-size: 13px; line-height: 1.65; margin: 0; }
+  .fdata { display: none; }
+
+  /* AI별 변화 */
+  .ai-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ai-col { background: var(--surface-2); border: 0.5px solid var(--border); border-radius: 12px; padding: 18px; }
+  .ai-col .ac-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .ai-col .ac-title { font-size: 14px; font-weight: 500; }
+  .ai-col .ac-sub { font-size: 12px; color: var(--text-muted); margin: 0 0 14px; }
+  .ai-item { padding: 10px 0; border-top: 0.5px solid var(--border); }
+  .ai-item:first-of-type { border-top: none; }
+  .ai-item .ai-name { font-size: 13px; font-weight: 500; margin: 0 0 6px; }
+  .ai-item .ai-engines { display: flex; gap: 6px; align-items: center; color: var(--text-secondary); flex-wrap: wrap; }
+  .ai-item .ai-engines .letter { font-size: 12px; font-weight: 500; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; }
+  .ai-item .ai-desc { font-size: 11px; color: var(--text-muted); margin: 6px 0 0; line-height: 1.6; }
+
+  /* 확인된 변화 vs 관찰중 */
+  .verify-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .verify-col { border-radius: 12px; padding: 18px; }
+  .verify-col.confirmed { background: var(--bg-success); }
+  .verify-col.watch { background: var(--bg-warning); }
+  .verify-col .vc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 14px; font-weight: 500; }
+  .verify-col.confirmed .vc-head { color: var(--text-success); }
+  .verify-col.watch .vc-head { color: var(--text-warning); }
+  .verify-col .vc-sub { font-size: 12px; margin: 0 0 14px; }
+  .verify-col.confirmed .vc-sub { color: var(--text-success); opacity: 0.85; }
+  .verify-col.watch .vc-sub { color: var(--text-warning); opacity: 0.85; }
+  .vc-item { background: var(--surface-2); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; }
+  .vc-item:last-child { margin-bottom: 0; }
+  .vc-item .vn { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .vc-item .vd { font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+
+  /* 근거 */
+  .expr-diff { display: flex; gap: 32px; flex-wrap: wrap; }
+  .expr-diff .ed-col { flex: 1; min-width: 200px; }
+  .expr-diff .ed-label { font-size: 11px; color: var(--text-muted); margin: 0 0 10px; }
+  .expr-diff .ed-chip { display: inline-flex; align-items: center; font-size: 12px; padding: 4px 10px; border-radius: 20px; margin: 0 6px 8px 0; }
+  .expr-diff .ed-chip.new { background: var(--bg-success); color: var(--text-success); }
+  .expr-diff .ed-chip.gone { background: var(--bg-warning); color: var(--text-warning); text-decoration: line-through; }
+  .evidence-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .evidence-box { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 15px; background: var(--surface-2); }
+  .evidence-box .src { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+  .evidence-box .quote { font-size: 13px; line-height: 1.75; margin: 0; }
+  mark.ours { background: #DCE9C8; padding: 1px 3px; border-radius: 3px; font-weight: 500; }
+  mark.comp { background: #E8E5DA; padding: 1px 3px; border-radius: 3px; }
+  .src-change { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); background: var(--surface-1); border-radius: var(--radius); padding: 10px 14px; margin-top: 30px; }
+  .src-change .arrow { color: var(--text-muted); }
+
+  /* 아코디언 */
+  .acc-section { border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; margin-top: 18px; }
+  .acc-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 20px; cursor: pointer; background: var(--surface-2); gap: 12px; }
+  .acc-head:hover { background: var(--surface-1); }
+  .acc-head .at { font-size: 14px; font-weight: 500; margin: 0 0 2px; }
+  .acc-head .as { font-size: 12px; color: var(--text-muted); margin: 0; }
+  .acc-chev { font-size: 15px; color: var(--text-muted); transition: transform 0.15s; flex-shrink: 0; }
+  .acc-chev.open { transform: rotate(180deg); }
+  .acc-body { display: none; padding: 6px 20px 22px; border-top: 0.5px solid var(--border); }
+  .acc-body.open { display: block; }
+
+  /* ============================================
+     엔슬의 팁 박스 (Ensl Tip Box)
+     — 모든 화면 하단에 공통으로 쓰는 컴포넌트.
+       재사용 시 .tip-title / .tip-desc / .tip-btn
+       텍스트만 바꾸면 됨. 구조·클래스는 고정.
+     ============================================ */
+  .tip-box { margin: 52px 0 0; border: 0.5px solid var(--border-strong); border-radius: 12px; background: transparent; padding: 24px 26px; }
+  .tip-badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-muted); border: 0.5px solid var(--border-strong); border-radius: 4px; padding: 2px 7px; margin: 0 0 14px; }
+  .tip-title { font-size: 19px; font-weight: 500; color: var(--text-primary); margin: 0 0 8px; line-height: 1.45; }
+  .tip-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 16px; }
+  .tip-btn {
+    font-size: 13px; padding: 0; border: none; background: transparent;
+    color: var(--text-primary); font-weight: 500; display: inline-flex;
+    align-items: center; gap: 6px; border-bottom: 1px solid var(--border-strong);
+    border-radius: 0; padding-bottom: 3px; transition: border-color 0.2s;
+  }
+  .tip-btn:hover { background: transparent; border-bottom-color: var(--text-primary); }
+  .tip-arrow { display: inline-block; transition: transform 0.2s ease; font-size: 12px; }
+  .tip-btn:hover .tip-arrow { transform: translate(2px, -2px); }
+
+  /* 완료 마침표 */
+  .done-cta { margin-top: 32px; padding-top: 32px; border-top: 0.5px solid var(--border-strong); }
+  .done-title { font-size: 19px; font-weight: 500; line-height: 1.55; margin: 0 0 20px; }
+  .done-btn { font-size: 13.5px; font-weight: 500; padding: 11px 20px; background: var(--text-primary); color: var(--surface-2); border: none; border-radius: var(--radius); display: inline-flex; align-items: center; gap: 7px; }
+  .done-btn:hover { background: #000; }
+  .done-arrow { transition: transform 0.2s ease; display: inline-block; }
+  .done-btn:hover .done-arrow { transform: translateX(3px); }
+
+  /* 모달 시각 요소 */
+  .modal-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--bg-success); color: var(--text-success); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+  .modal-tip { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+  .mt-num { width: 22px; height: 22px; border-radius: 50%; border: 0.5px solid var(--border-strong); color: var(--text-muted); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; flex-shrink: 0; margin-top: 1px; }
+  .mt-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .mt-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+
+  .modal-closing { background: var(--surface-1); border-radius: var(--radius); padding: 14px 16px; border-top: 2px solid var(--text-primary); display: flex; gap: 12px; align-items: flex-start; }
+  .mc-icon { width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); color: var(--text-primary); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .mc-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .mc-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+<defs>
+<symbol id="ic-sparkle" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 L14.3 9.7 L22 12 L14.3 14.3 L12 22 L9.7 14.3 L2 12 L9.7 9.7 Z"/></symbol>
+<symbol id="ic-asterisk" viewBox="0 0 24 24">
+<rect x="10.6" y="2" width="2.8" height="20" rx="1.4" fill="currentColor"/>
+<rect x="10.6" y="2" width="2.8" height="20" rx="1.4" fill="currentColor" transform="rotate(60 12 12)"/>
+<rect x="10.6" y="2" width="2.8" height="20" rx="1.4" fill="currentColor" transform="rotate(120 12 12)"/>
+</symbol>
+<symbol id="ic-burst" viewBox="0 0 24 24">
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor"/>
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor" transform="rotate(45 12 12)"/>
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor" transform="rotate(90 12 12)"/>
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor" transform="rotate(135 12 12)"/>
+</symbol>
+<symbol id="ic-knot" viewBox="0 0 24 24">
+<circle cx="12" cy="6.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+<circle cx="7" cy="15" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+<circle cx="17" cy="15" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+</symbol>
+</defs>
+</svg>
+
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="logo-row"><div class="logo-mark"></div><span class="logo-text">ensl</span></div>
+    <div class="brand-box" id="brand-box" onclick="toggleBrandDropdown(event)">
+      <p class="label">진단 중인 브랜드</p>
+      <div class="row"><p class="name">365서울원탑치과</p><i class="ti ti-chevron-down"></i></div>
+      <div class="brand-dropdown">
+        <div class="brand-item active">365서울원탑치과<i class="ti ti-check"></i></div>
+        <div class="brand-add" onclick="window.location.href='ensl_onboarding_step1.html'"><i class="ti ti-plus"></i>새 브랜드 추가</div>
+      </div>
+    </div>
+    <nav>
+      <a href="ensl_brand_awareness.html">브랜드 인지</a>
+      <a href="ensl_brand_position.html">브랜드 현 위치</a>
+      <a href="ensl_gap_screen.html">인지와 위치의 간극</a>
+      <a href="ensl_trend_screen.html" class="active">변화 추이</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="status">진단 7일차 · 7일 중</span>
+      <span class="updated">18:00 기준 업데이트</span>
+    </div>
+
+    <div class="content">
+
+      <div class="eyebrow-row">
+        <span class="eyebrow">변화 추이</span>
+        <span class="approved-badge">✓ 분석 완료 · 근거 검토됨</span>
+      </div>
+      <h1>브랜드 한 줄과 차지한 자리는 어떻게 달라지고 있나?</h1>
+      <p class="meta-row">
+        <span><i class="ti ti-help-circle"></i>인지 질문 3개</span>
+        <span><i class="ti ti-target-arrow"></i>자리 질문 9개</span>
+        <span><i class="ti ti-robot"></i>AI 6개</span>
+        <span><i class="ti ti-circle-check"></i>1차 진단 · 8/19~8/25 (7일)</span>
+      </p>
+
+      <!-- 1. 비교 기준 -->
+      <p class="basis-line">
+        <b>8/19~8/21</b> → <b>8/23~8/25</b> 비교 <span class="sep">·</span>
+        <i class="ti ti-check"></i>같은 진단 안 · 질문·AI·관측 조건 동일
+      </p>
+
+      <!-- Hero: 결론 -->
+      <div class="hero">
+        <p class="sub-label">7일을 통틀어 확인된 변화</p>
+        <p class="sentence">365서울원탑치과는 여전히 <b>'자체 기공소 보유 치과'</b>로 인지되고 있으며, 최근에는 <b>'전체 임플란트'</b> 자리에서도 반복해서 선택되기 시작했어요.</p>
+
+        <div class="split">
+          <div class="split-box">
+            <p class="k">유지된 인지</p>
+            <p class="v">자체 기공소 보유 치과</p>
+            <p class="d">전체 인지 등장률은 88%→91%로 안정 · '자체 기공소' 언급은 12%→29%로 더 뚜렷해짐</p>
+          </div>
+          <div class="connector">
+            <div class="line"></div>
+            <span class="tag">같은 기간에 관찰됨</span>
+          </div>
+          <div class="split-box">
+            <p class="k">새로 시작된 선택</p>
+            <p class="v">전체 임플란트 (일반 추천 질문)</p>
+            <p class="d">"임플란트 잘하는 치과 추천해줘" 선택률 18%→66%로 상승</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 브랜드 한 줄의 변화 -->
+      <section>
+        <h2 class="sec">브랜드 인지, 이번 주 흐름</h2>
+        <p class="sec-sub">인지 질문 답변에서 브랜드와 각 특징이 얼마나 자주 언급됐는지, 날짜별 흐름이에요. 점을 누르면 그날의 실제 답변을 볼 수 있어요.</p>
+
+        <div class="chart-card">
+          <div class="chart-legend">
+            <label class="leg-item" id="legA-overall"><input type="checkbox" checked onchange="toggleLine('A','overall',this)"><span class="leg-swatch" style="background:var(--line-1);"></span>전체 인지 등장률</label>
+            <label class="leg-item" id="legA-gigongso"><input type="checkbox" checked onchange="toggleLine('A','gigongso',this)"><span class="leg-swatch" style="background:var(--line-3);"></span>'자체 기공소' 언급 비중</label>
+            <label class="leg-item" id="legA-hyeopjin"><input type="checkbox" checked onchange="toggleLine('A','hyeopjin',this)"><span class="leg-swatch" style="background:var(--line-2);"></span>'전문의 협진' 언급 비중</label>
+          </div>
+          <div class="chart-svg-wrap">
+            <svg id="chartA" width="680" height="200" viewBox="0 0 680 200">
+              <line class="gridline" x1="44" y1="16" x2="656" y2="16"></line>
+              <line class="gridline" x1="44" y1="96" x2="656" y2="96"></line>
+              <line class="gridline" x1="44" y1="176" x2="656" y2="176"></line>
+              <text class="axis-label" x="10" y="20">100%</text>
+              <text class="axis-label" x="18" y="100">50%</text>
+              <text class="axis-label" x="22" y="180">0%</text>
+              <polyline class="chart-line" id="lineA-overall" stroke="var(--line-1)" points="44.0,35.2 146.0,32.0 248.0,38.4 350.0,30.4 452.0,33.6 554.0,27.2 656.0,32.0"></polyline>
+              <polyline class="chart-line" id="lineA-gigongso" stroke="var(--line-3)" points="44.0,160.0 146.0,156.8 248.0,152.0 350.0,147.2 452.0,137.6 554.0,128.0 656.0,121.6"></polyline>
+              <polyline class="chart-line" id="lineA-hyeopjin" stroke="var(--line-2)" points="44.0,76.8 146.0,80.0 248.0,83.2 350.0,88.0 452.0,96.0 554.0,99.2 656.0,105.6"></polyline>
+              <g id="ptsA-overall" fill="var(--line-1)"></g>
+              <g id="ptsA-gigongso" fill="var(--line-3)"></g>
+              <g id="ptsA-hyeopjin" fill="var(--line-2)"></g>
+              <text class="day-label" x="30" y="196">8/19</text>
+              <text class="day-label" x="130" y="196">8/20</text>
+              <text class="day-label" x="232" y="196">8/21</text>
+              <text class="day-label" x="334" y="196">8/22</text>
+              <text class="day-label" x="436" y="196">8/23</text>
+              <text class="day-label" x="538" y="196">8/24</text>
+              <text class="day-label" x="640" y="196">8/25</text>
+            </svg>
+          </div>
+          <p class="chart-read"><b>읽는 법:</b> 전체 인지 등장률(진한 초록)은 88%→91%로 큰 변화가 없었어요. '자체 기공소' 언급(주황)은 12%→29%로 늘고 '전문의 협진' 언급(회색)은 60%→47%로 줄었는데, 둘 다 7일 내내 같은 방향이었어요.</p>
+        </div>
+        <p class="graph-hint"><i class="ti ti-hand-click" style="font-size:13px;"></i>그래프의 점을 누르면 그날의 실제 답변 근거가 여기 나타나요.</p>
+        <div class="graph-evidence" id="evidenceA"></div>
+
+        <div class="acc-section">
+          <div class="acc-head" onclick="toggleAcc('sentence')">
+            <div><p class="at">브랜드 한 줄, 무엇이 바뀌었을까?</p><p class="as">대표 문장 대조 · 유지·신규·약화 특징 · 왜 바뀌었는지</p></div>
+            <i class="ti ti-chevron-down acc-chev" id="chev-sentence"></i>
+          </div>
+          <div class="acc-body" id="body-sentence">
+            <div class="sd-card" style="margin-top:16px;">
+              <div class="sd-item prev">
+                <span class="sd-tag">초반 (1~3일차)</span>
+                <p class="sd-txt">365서울원탑치과는 강서구에서 <mark class="lose">전문의 협진</mark> 체계를 갖추고 <mark class="lose">고난도 임플란트</mark> 치료 경험이 많은 치과로 소개됩니다.</p>
+              </div>
+              <div class="sd-item now">
+                <span class="sd-tag">후반 (5~7일차)</span>
+                <p class="sd-txt">365서울원탑치과는 <mark class="gain">자체 기공소</mark>를 운영하는 치과로 소개되며, <mark class="gain">임플란트 진료 전반</mark>에서 반복적으로 언급됩니다.</p>
+              </div>
+            </div>
+
+            <div class="feat-card">
+              <div class="feat-row">
+                <span class="fdot kept"></span>
+                <span class="flabel">유지된 특징</span>
+                <span class="ftext">임플란트 치료 경험 <span class="sub">· 표현만 구체 → 포괄로 변화</span></span>
+              </div>
+              <div class="feat-row">
+                <span class="fdot new"></span>
+                <span class="flabel">새롭게 붙음</span>
+                <span class="ftext new-t">자체 기공소 <span class="sub" style="color:var(--text-success); opacity:0.75;">· 대표 특징으로 부상</span></span>
+              </div>
+              <div class="feat-row">
+                <span class="fdot weak"></span>
+                <span class="flabel">약해짐</span>
+                <span class="ftext weak-t">전문의 협진 <span class="sub" style="color:var(--text-warning); opacity:0.75;">· 대표 특징에서 제외, 언급 자체는 남아있음</span></span>
+              </div>
+            </div>
+
+            <div class="why-box">
+              <p class="k">왜 이렇게 바뀌었을까?</p>
+              <ul>
+                <li><b>확인된 사실:</b> '고난도 임플란트'라는 구체적 표현이 '임플란트 진료 전반'이라는 포괄적 표현으로 바뀌었고, 이 시기는 자리 질문에서 일반 임플란트 추천이 늘어난 시기와 겹쳐요.</li>
+                <li><b>추측(검증 안 됨) <span class="guess-tag">— 상관관계이지 인과관계로 단정 못 함</span>:</b> 추천 답변에서 반복 선택된 경험이 인지 문장의 표현에도 영향을 줬을 가능성이 있어요. 다만 인지 질문과 자리 질문은 서로 다른 질문이라, '선택이 인지를 바꿨다'고 확정할 근거는 아직 부족해요.</li>
+                <li><b>확인된 사실:</b> '전문의 협진'은 인지와 위치의 간극 화면에서 이미 선택 이유로 이어지지 않는다고 확인된 특징이에요. 이번 주 대표 특징에서 빠진 것도 같은 방향이에요.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. 자리 질문의 변화 -->
+      <section style="margin-bottom:24px;">
+        <h2 class="sec">자리 질문, 이번 주 흐름</h2>
+        <p class="sec-sub">9개 자리 질문 중 변화가 뚜렷한 4개예요. 점을 누르면 그날의 실제 답변을 볼 수 있어요.</p>
+
+        <div class="chart-card">
+          <div class="chart-legend">
+            <label class="leg-item" id="legB-q1"><input type="checkbox" checked onchange="toggleLine('B','q1',this)"><span class="leg-swatch" style="background:var(--line-q1);"></span>임플란트 잘하는 치과 추천해줘</label>
+            <label class="leg-item" id="legB-q2"><input type="checkbox" checked onchange="toggleLine('B','q2',this)"><span class="leg-swatch" style="background:var(--line-q2);"></span>강서구 임플란트 잘하는 치과 추천해줘</label>
+            <label class="leg-item" id="legB-q3"><input type="checkbox" checked onchange="toggleLine('B','q3',this)"><span class="leg-swatch" style="background:var(--line-q3);"></span>강서구 치아교정 잘하는 치과 추천해줘</label>
+            <label class="leg-item" id="legB-q4"><input type="checkbox" checked onchange="toggleLine('B','q4',this)"><span class="leg-swatch" style="background:var(--line-q4);"></span>강서구 야간진료 치과 추천해줘</label>
+          </div>
+          <div class="chart-svg-wrap">
+            <svg id="chartB" width="680" height="200" viewBox="0 0 680 200">
+              <line class="gridline" x1="44" y1="16" x2="656" y2="16"></line>
+              <line class="gridline" x1="44" y1="96" x2="656" y2="96"></line>
+              <line class="gridline" x1="44" y1="176" x2="656" y2="176"></line>
+              <text class="axis-label" x="10" y="20">100%</text>
+              <text class="axis-label" x="18" y="100">50%</text>
+              <text class="axis-label" x="22" y="180">0%</text>
+              <polyline class="chart-line" id="lineB-q1" stroke="var(--line-q1)" points="44.0,152.0 146.0,147.2 248.0,140.8 350.0,120.0 452.0,92.8 554.0,67.2 656.0,49.6"></polyline>
+              <polyline class="chart-line" id="lineB-q2" stroke="var(--line-q2)" points="44.0,99.2 146.0,92.8 248.0,96.0 350.0,60.8 452.0,91.2 554.0,83.2 656.0,80.0"></polyline>
+              <polyline class="chart-line" id="lineB-q3" stroke="var(--line-q3)" points="44.0,43.2 146.0,48.0 248.0,56.0 350.0,67.2 452.0,80.0 554.0,96.0 656.0,104.0"></polyline>
+              <polyline class="chart-line" id="lineB-q4" stroke="var(--line-q4)" stroke-dasharray="4 3" points="44.0,176.0 146.0,176.0 248.0,168.0 350.0,176.0 452.0,163.2 554.0,152.0 656.0,136.0"></polyline>
+              <g id="ptsB-q1" fill="var(--line-q1)"></g>
+              <g id="ptsB-q2" fill="var(--line-q2)"></g>
+              <g id="ptsB-q3" fill="var(--line-q3)"></g>
+              <g id="ptsB-q4" fill="var(--line-q4)"></g>
+              <circle cx="350" cy="60.8" r="9" fill="none" stroke="var(--text-warning)" stroke-width="1.2" stroke-dasharray="2 2"></circle>
+              <text class="day-label" x="30" y="196">8/19</text>
+              <text class="day-label" x="130" y="196">8/20</text>
+              <text class="day-label" x="232" y="196">8/21</text>
+              <text class="day-label" x="334" y="196">8/22</text>
+              <text class="day-label" x="436" y="196">8/23</text>
+              <text class="day-label" x="538" y="196">8/24</text>
+              <text class="day-label" x="640" y="196">8/25</text>
+            </svg>
+          </div>
+          <p class="chart-read"><b>읽는 법:</b> '임플란트 잘하는 치과'(진한 초록)는 7일 내내 상승, '강서구 치아교정'(주황)은 7일 내내 하락했어요. 점선(연회색)인 '강서구 야간진료'는 등락을 반복해서 아직 추세로 보기 일러요. 점선 원(8/22)은 '강서구 임플란트'(회색)에서 하루만 튄 값이에요.</p>
+        </div>
+        <p class="graph-hint"><i class="ti ti-hand-click" style="font-size:13px;"></i>그래프의 점을 누르면 그날의 실제 답변 근거가 여기 나타나요.</p>
+        <div class="graph-evidence" id="evidenceB"></div>
+
+        <div class="acc-section">
+          <div class="acc-head" onclick="toggleAcc('position')">
+            <div><p class="at">자리 질문, 어디서 바뀌었을까?</p><p class="as">전환 유형별 근거 4가지 (미선택→가끔·가끔→강하게·강하게→약화·경쟁사 부상)</p></div>
+            <i class="ti ti-chevron-down acc-chev" id="chev-position"></i>
+          </div>
+          <div class="acc-body" id="body-position">
+        <div class="flist" style="margin-top:16px;">
+          <div class="frow selected" onclick="select(this,'rise')">
+            <div><p class="fname">임플란트 잘하는 치과 추천해줘</p><p class="fsub">초반 18% → 후반 66%</p></div>
+            <div class="right"><span class="pill rise">가끔 → 강하게 선택됨</span><span class="chev">›</span></div>
+          </div>
+          <div class="frow" onclick="select(this,'start')">
+            <div><p class="fname">강서구 야간진료 치과 추천해줘</p><p class="fsub">초반 2% → 후반 16%</p></div>
+            <div class="right"><span class="pill start">아직 선택 안 됨 → 가끔 선택됨</span><span class="chev">›</span></div>
+          </div>
+          <div class="frow" onclick="select(this,'fall')">
+            <div><p class="fname">강서구 치아교정 잘하는 치과 추천해줘</p><p class="fsub">초반 79% → 후반 52%</p></div>
+            <div class="right"><span class="pill fall">강하게 선택됨 → 약해짐</span><span class="chev">›</span></div>
+          </div>
+          <div class="frow" onclick="select(this,'comp')">
+            <div><p class="fname">강서구 치아교정 — 경쟁 브랜드(강서○○치과)</p><p class="fsub">초반 8% → 후반 34%</p></div>
+            <div class="right"><span class="pill comp">경쟁 브랜드 부상</span><span class="chev">›</span></div>
+          </div>
+        </div>
+
+        <div class="detail-panel">
+          <div id="fdata-rise" class="fdata" style="display:block;">
+            <div class="dp-top">
+              <div><p class="dp-eyebrow">자리 질문 변화 근거</p><h3 class="dp-name">임플란트 잘하는 치과 추천해줘</h3></div>
+              <span class="pill rise">가끔 → 강하게 선택됨</span>
+            </div>
+            <div class="dp-track">
+              <div class="tbox"><p class="k">초반(1~3일차) 평균</p><p class="v">18% (약 4/24건)</p></div>
+              <span class="tarrow">→</span>
+              <div class="tbox"><p class="k">후반(5~7일차) 평균</p><p class="v">66% (약 16/24건)</p></div>
+            </div>
+            <div class="dp-grid">
+              <div class="dp-card"><p class="t">초반 답변 (8/19)</p><p class="q">"임플란트 잘하는 치과 추천해줘"<br><br>"임플란트는 병원마다 방식이 달라 직접 상담을 받아보시는 걸 권장드립니다…" (브랜드 특정 언급 없음)</p><p class="s">Perplexity · 8월 19일</p></div>
+              <div class="dp-card"><p class="t">후반 답변 (8/25)</p><p class="q">"임플란트 잘하는 치과 추천해줘"<br><br>"365서울원탑치과가 자주 언급됩니다. 자체 기공 시스템을 운영해 보철물 제작 기간이 짧고, 임플란트 진료 경험이 많다는 점이 근거로 제시됩니다…"</p><p class="s">Perplexity · 8월 25일</p></div>
+            </div>
+            <div class="dp-fact"><p class="t">현재 확인된 사실</p><p class="v">7일 중 5일 이상, AI 5개 이상에서 반복 확인된 변화예요. 일시적 흔들림이 아니라 확인된 추세로 분류했어요.</p></div>
+          </div>
+
+          <div id="fdata-start" class="fdata">
+            <div class="dp-top">
+              <div><p class="dp-eyebrow">자리 질문 변화 근거</p><h3 class="dp-name">강서구 야간진료 치과 추천해줘</h3></div>
+              <span class="pill start">아직 선택 안 됨 → 가끔 선택됨</span>
+            </div>
+            <div class="dp-track">
+              <div class="tbox"><p class="k">초반(1~3일차) 평균</p><p class="v">2% (거의 미등장)</p></div>
+              <span class="tarrow">→</span>
+              <div class="tbox"><p class="k">후반(5~7일차) 평균</p><p class="v">16%</p></div>
+            </div>
+            <div class="dp-grid">
+              <div class="dp-card"><p class="t">초반 답변</p><p class="q">이 기간 24개 답변 중 365서울원탑치과가 등장한 사례가 거의 없었어요.</p><p class="s">초반 · 미등장</p></div>
+              <div class="dp-card"><p class="t">후반 답변 (8/25)</p><p class="q">"강서구 야간진료 치과 추천해줘"<br><br>"365서울원탑치과는 평일 야간 진료를 운영한다는 안내가 확인됩니다…"</p><p class="s">Gemini · 8월 25일</p></div>
+            </div>
+            <div class="dp-fact"><p class="t">현재 확인된 사실</p><p class="v">등락을 반복하며 0%로 돌아간 날도 있었어요. 아직 반복 검증이 더 필요해서 '관찰 중인 신호'로 남겨뒀어요 — 확인된 변화로 승격하려면 더 지켜봐야 해요.</p></div>
+          </div>
+
+          <div id="fdata-fall" class="fdata">
+            <div class="dp-top">
+              <div><p class="dp-eyebrow">자리 질문 변화 근거</p><h3 class="dp-name">강서구 치아교정 잘하는 치과 추천해줘</h3></div>
+              <span class="pill fall">강하게 선택됨 → 약해짐</span>
+            </div>
+            <div class="dp-track">
+              <div class="tbox"><p class="k">초반(1~3일차) 평균</p><p class="v">79%</p></div>
+              <span class="tarrow">→</span>
+              <div class="tbox"><p class="k">후반(5~7일차) 평균</p><p class="v">52%</p></div>
+            </div>
+            <div class="dp-grid">
+              <div class="dp-card"><p class="t">초반 답변 (8/19)</p><p class="q">"강서구 치아교정 잘하는 치과 추천해줘"<br><br>"365서울원탑치과가 교정 전문의를 두고 있어 대표적으로 언급됩니다…"</p><p class="s">Gemini · 8월 19일</p></div>
+              <div class="dp-card"><p class="t">후반 답변 (8/25)</p><p class="q">"강서구 치아교정 잘하는 치과 추천해줘"<br><br>"강서○○치과가 교정 전문 클리닉을 운영한다는 점에서 언급됩니다. 365서울원탑치과는 이번 답변에서 언급되지 않았습니다…"</p><p class="s">Gemini · 8월 25일</p></div>
+            </div>
+            <div class="dp-fact"><p class="t">현재 확인된 사실</p><p class="v">이 하락은 Perplexity·Gemini 두 AI에서 뚜렷하고, 나머지 4개 AI에서는 변화가 크지 않았어요. 전체 경향이 아니라 일부 AI에서 두드러진 변화예요.</p></div>
+          </div>
+
+          <div id="fdata-comp" class="fdata">
+            <div class="dp-top">
+              <div><p class="dp-eyebrow">자리 질문 변화 근거</p><h3 class="dp-name">강서구 치아교정 — 경쟁 브랜드(강서○○치과)</h3></div>
+              <span class="pill comp">경쟁 브랜드 부상</span>
+            </div>
+            <div class="dp-track">
+              <div class="tbox"><p class="k">초반(1~3일차) 평균</p><p class="v">8%</p></div>
+              <span class="tarrow">→</span>
+              <div class="tbox"><p class="k">후반(5~7일차) 평균</p><p class="v">34%</p></div>
+            </div>
+            <div class="dp-card" style="margin-bottom:14px;">
+              <p class="t">후반 답변 (8/25)</p>
+              <p class="q">"강서구 치아교정 잘하는 치과 추천해줘"<br><br>"<mark class="comp">강서○○치과</mark>가 교정 전문 클리닉을 표방하며 자주 언급됩니다. 최근 지역 커뮤니티에서 후기가 늘었다는 점도 함께 확인됩니다…"</p>
+              <p class="s">Gemini · 8월 25일</p>
+            </div>
+            <div class="dp-fact"><p class="t">현재 확인된 사실</p><p class="v">우리 브랜드가 약해진 같은 자리에서 경쟁 브랜드가 새로 강해졌어요. 같은 질문 안에서 자리를 내준 것인지, 두 변화가 우연히 겹친 것인지는 추가 관측이 필요해요.</p></div>
+          </div>
+        </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. 근거 -->
+      <div class="acc-section" style="margin-bottom:0;">
+        <div class="acc-head" onclick="toggleAcc('evidence')">
+          <div><p class="at">무엇을 근거로 판단했을까?</p><p class="as">새로 등장·사라진 표현 · 이전/현재 답변 대조 · 경쟁 브랜드와 출처 변화</p></div>
+          <i class="ti ti-chevron-down acc-chev" id="chev-evidence"></i>
+        </div>
+        <div class="acc-body" id="body-evidence">
+        <p class="sec-sub" style="margin-top:16px;">'임플란트 잘하는 치과 추천해줘' 질문에서 새로 등장하거나 사라진 표현, 그리고 경쟁 구도와 출처의 변화예요.</p>
+
+        <p class="sub-h" style="margin-top:0;"><i class="ti ti-message-plus" style="font-size:14px;"></i>새롭게 등장하거나 사라진 표현</p>
+        <div class="expr-diff">
+          <div class="ed-col">
+            <p class="ed-label">후반에 새로 등장한 표현</p>
+            <span class="ed-chip new">자체 기공 시스템</span>
+            <span class="ed-chip new">임플란트 진료 경험이 많다</span>
+            <span class="ed-chip new">보철물 제작 기간이 짧다</span>
+          </div>
+          <div class="ed-col">
+            <p class="ed-label">이 질문에서 더 이상 안 보이는 표현</p>
+            <span class="ed-chip gone">전문의 협진 체계</span>
+          </div>
+        </div>
+
+        <p class="sub-h"><i class="ti ti-message-2" style="font-size:14px;"></i>이전과 현재의 실제 답변 비교</p>
+        <div class="evidence-pair">
+          <div class="evidence-box">
+            <p class="src">Perplexity · 8월 19일 (초반) · 미등장</p>
+            <p class="quote">"임플란트는 병원마다 진료 방식과 비용이 달라 직접 상담을 받아보시는 걸 권장드립니다. 지역 내 여러 치과를 비교해보시는 것도 방법입니다…"</p>
+          </div>
+          <div class="evidence-box">
+            <p class="src">Perplexity · 8월 25일 (후반) · 등장함</p>
+            <p class="quote">"<mark class="ours">365서울원탑치과</mark>가 자주 언급됩니다. 자체 기공 시스템을 운영해 보철물 제작 기간이 짧고, 임플란트 진료 경험이 많다는 점이 근거로 제시됩니다…"</p>
+          </div>
+        </div>
+
+        <p class="sub-h"><i class="ti ti-users" style="font-size:14px;"></i>변화한 경쟁 브랜드와 출처</p>
+        <div class="evidence-pair">
+          <div class="evidence-box">
+            <p class="src">Gemini · 8월 19일 (초반) · 우리 브랜드 등장</p>
+            <p class="quote">"강서구 치아교정으로는 <mark class="ours">365서울원탑치과</mark>가 대표적으로 언급됩니다. 교정 전문의를 두고 있다는 점이 근거로 제시됩니다…"</p>
+          </div>
+          <div class="evidence-box">
+            <p class="src">Gemini · 8월 25일 (후반) · 경쟁 브랜드로 교체</p>
+            <p class="quote">"강서구 치아교정으로는 <mark class="comp">강서○○치과</mark>가 언급됩니다. 교정 전문 클리닉을 표방하며 최근 지역 커뮤니티 후기가 늘었다는 점이 언급됩니다…"</p>
+          </div>
+        </div>
+        <div class="src-change">
+          <span>주요 출처 변화</span>
+          <span>병원 홈페이지 · 네이버 플레이스</span>
+          <span class="arrow">→</span>
+          <span>지역 커뮤니티 · 지역 블로그</span>
+        </div>
+        </div>
+      </div>
+
+      <!--
+        엔슬의 팁 박스 — 데이터 소스: 위 "자리 질문, 이번 주 흐름" 차트의
+        8/22 스파이크 주석(강서구 임플란트, 점선 원)을 그대로 재사용.
+        새 분석 로직 없음. 차트 주석이 바뀌면 이 문구도 함께 바뀌어야 함.
+
+        조건부 렌더링 — 이번 주 이상치 유무에 따라 둘 중 하나만 노출 (동시 노출 금지):
+        · 이상치 있음 → 아래 tip-box 그대로 (현재 상태)
+        · 이상치 없음 → tip-title/tip-desc를 아래 값으로 교체하고 tip-btn 숨김
+          tip-title: "이번 주는 흔들림 없이 안정적으로 움직였어요."
+          tip-desc : "모든 지표가 7일 내내 방향을 유지했고, 하루짜리 이상치는 확인되지 않았어요."
+      -->
+      <div class="tip-box">
+        <span class="tip-badge">TIP</span>
+        <p class="tip-title">AI의 한마디보다, 자꾸 하는 말을 봐요.</p>
+        <p class="tip-desc">'강서구 임플란트' 선택률은 8월 22일 하루만 72%로 올랐다가 다음 날 평소 수준인 53%로 돌아왔어요. Gemini 한 곳에서만 나타난 변화였고, 7일 동안 같은 방향으로 움직인 '임플란트 잘하는 치과'(18%→66%)와 달리 아직 추세로 보지 않았어요.</p>
+        <button class="tip-btn" id="tips-btn" onclick="openTips()">확인된 추세와 일시적 흔들림 구분하는 법 <span class="tip-arrow">↗</span></button>
+      </div>
+
+      <!-- 완료 마침표: 다음 진단 순환 -->
+      <div class="done-cta">
+        <p class="done-title">365서울원탑치과의 1차 진단이 끝났어요.<br>다음 진단은 새로운 7일로 다시 시작돼요.</p>
+        <button class="done-btn" onclick="window.location.href='ensl_brand_awareness.html'">브랜드 인지로 돌아가기 <span class="done-arrow">→</span></button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Tips Modal -->
+<div id="tips-modal" style="display:none; position:fixed; inset:0; background:rgba(26,26,24,0.4); z-index:50; align-items:center; justify-content:center; padding:20px;" onclick="if(event.target===this) closeTips();">
+  <div style="background:var(--surface-2); border-radius:12px; max-width:520px; width:100%; max-height:80vh; overflow-y:auto; padding:28px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:22px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span class="modal-mark"><i class="ti ti-bulb"></i></span>
+        <h2 style="font-size:19px; font-weight:500; margin:0;">확인된 추세는 어떻게 가려낼까?</h2>
+      </div>
+      <button onclick="closeTips()" style="border:none; padding:4px; font-size:18px; line-height:1; color:var(--text-muted);">✕</button>
+    </div>
+
+    <div class="modal-tip">
+      <span class="mt-num">1</span>
+      <div>
+        <p class="mt-title">방향이 며칠간 유지되는지 보기</p>
+        <p class="mt-desc">하루 오르고 다음 날 내리는 건 흔들림이에요. 같은 방향이 최소 며칠 이상 이어지는지부터 확인하세요.</p>
+      </div>
+    </div>
+    <div class="modal-tip">
+      <span class="mt-num">2</span>
+      <div>
+        <p class="mt-title">여러 AI에서 반복되는지 보기</p>
+        <p class="mt-desc">특정 AI 한 곳에서만 튄 값이라면, 그 AI의 그날그날 응답 차이일 가능성이 커요. 다른 AI에서도 같은 변화가 보이는지 확인하세요.</p>
+      </div>
+    </div>
+    <div class="modal-tip">
+      <span class="mt-num">3</span>
+      <div>
+        <p class="mt-title">튄 지점의 실제 답변을 먼저 열어보기</p>
+        <p class="mt-desc">숫자만 보지 말고 그래프의 점을 눌러 그날 실제로 어떤 답변이 나왔는지 확인하세요. 우연히 겹친 문구인지, 근거가 있는 변화인지 구분할 수 있어요.</p>
+      </div>
+    </div>
+    <div class="modal-tip" style="margin-bottom:20px;">
+      <span class="mt-num">4</span>
+      <div>
+        <p class="mt-title">다음 진단에서도 같은 방향인지 확인하기</p>
+        <p class="mt-desc">한 번의 7일 관측만으로는 확정하기 어려운 변화도 있어요. 다음 진단에서도 같은 흐름이 이어지면 그때 '확인된 추세'로 올릴 수 있어요.</p>
+      </div>
+    </div>
+
+    <div class="modal-closing">
+      <span class="mc-icon"><i class="ti ti-repeat"></i></span>
+      <div>
+        <p class="mc-title">질문이 같아야 추세를 비교할 수 있어요</p>
+        <p class="mc-desc">진단마다 질문이 달라지면 이번 흐름과 다음 흐름을 같은 기준으로 겹쳐볼 수 없어요. <strong style="color:var(--text-primary);">같은 질문·같은 AI 구성을 유지</strong>해야 진짜 추세인지 판단할 수 있어요.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openTips() {
+  document.getElementById('tips-modal').style.display = 'flex';
+}
+function closeTips() {
+  document.getElementById('tips-modal').style.display = 'none';
+}
+var XS = [44,146,248,350,452,554,656];
+var DATA = {
+  A: {
+    overall:  {ys:[35.2,32.0,38.4,30.4,33.6,27.2,32.0]},
+    gigongso: {ys:[160.0,156.8,152.0,147.2,137.6,128.0,121.6]},
+    hyeopjin: {ys:[76.8,80.0,83.2,88.0,96.0,99.2,105.6]}
+  },
+  B: {
+    q1: {ys:[152.0,147.2,140.8,120.0,92.8,67.2,49.6]},
+    q2: {ys:[99.2,92.8,96.0,60.8,91.2,83.2,80.0]},
+    q3: {ys:[43.2,48.0,56.0,67.2,80.0,96.0,104.0]},
+    q4: {ys:[176.0,176.0,168.0,176.0,163.2,152.0,136.0]}
+  }
+};
+function drawPoints(chart, key) {
+  var g = document.getElementById('pts'+chart+'-'+key);
+  var d = DATA[chart][key];
+  var html = '';
+  for (var i=0;i<7;i++){
+    html += '<circle class="chart-point" cx="'+XS[i]+'" cy="'+d.ys[i]+'" r="4" onclick="onPointClick(\''+chart+'\',\''+key+'\','+i+')"></circle>';
+  }
+  g.innerHTML = html;
+}
+['overall','gigongso','hyeopjin'].forEach(function(k){ drawPoints('A',k); });
+['q1','q2','q3','q4'].forEach(function(k){ drawPoints('B',k); });
+
+function toggleLine(chart, key, cb) {
+  var on = cb.checked;
+  document.getElementById('line'+chart+'-'+key).style.display = on ? '' : 'none';
+  document.getElementById('pts'+chart+'-'+key).style.display = on ? '' : 'none';
+  document.getElementById('leg'+chart+'-'+key).classList.toggle('off', !on);
+}
+
+var EVIDENCE_A = {
+  0: { day:"8/19", quotes:[
+        {t:"'자체 기공소' 관련", s:"Claude · 8/19", q:"인지 질문 답변에서 자체 기공소 언급이 아직 짧게만 등장해요."},
+        {t:"'전문의 협진' 관련", s:"ChatGPT · 8/19", q:"\"여러 전문 분야의 원장진이 함께 진료하는 협진 체계를 운영하는 치과로 소개됩니다…\""}
+      ], note:{ok:true, text:"주 초반 기준값이에요. 이후 변화는 이 날을 기준으로 비교해요."} },
+  6: { day:"8/25", quotes:[
+        {t:"'자체 기공소' 관련", s:"Perplexity · 8/25", q:"\"365서울원탑치과는 자체 기공 시스템을 운영해 보철물 제작 기간이 짧다는 점이 자주 언급됩니다…\""},
+        {t:"'전문의 협진' 관련", s:"ChatGPT · 8/25", q:"\"전문의 협진에 대한 언급은 이번 회차 답변에서 비중이 줄었습니다…\""}
+      ], note:{ok:true, text:"7일 전(8/19)과 비교하면 '자체 기공소'는 언급이 늘고 '전문의 협진'은 줄었어요. 7일 내내 같은 방향이라 확인된 변화로 분류했어요."} }
+};
+function defaultEvidenceA(){ return {day:"8/19~8/25 전체", quotes:[
+    {t:"안내", s:"", q:"위 그래프에서 점을 누르면 해당 날짜의 실제 AI 답변 근거가 여기에 표시돼요. 지금은 주 시작(8/19)과 주 마감(8/25) 근거를 보여드려요."},
+  ], note:null}; }
+
+var EVIDENCE_B = {
+  "q1-0": { day:"8/19", quotes:[
+        {t:"답변 원문", s:"Perplexity · 8/19", q:"\"임플란트는 병원마다 방식이 달라 직접 상담을 받아보시는 걸 권장드립니다…\" (브랜드 특정 언급 없음)"}
+      ], note:{ok:false, text:"이 시점엔 선택률이 낮았어요. 아직 이 자리에서 자주 선택되지 않던 시기예요."} },
+  "q1-6": { day:"8/25", quotes:[
+        {t:"답변 원문", s:"Perplexity · 8/25", q:"\"365서울원탑치과가 자주 언급됩니다. 자체 기공 시스템을 운영해 보철물 제작 기간이 짧고, 임플란트 진료 경험이 많다는 점이 근거로 제시됩니다…\""}
+      ], note:{ok:true, text:"7일 동안 꾸준히 오른 뒤 나온 답변이에요. 하루짜리 우연이 아니라 누적된 추세의 결과로 볼 수 있어요."} },
+  "q2-3": { day:"8/22 (스파이크)", quotes:[
+        {t:"답변 원문", s:"Gemini · 8/22", q:"\"강서구 임플란트로는 365서울원탑치과가 유일하게 언급됩니다…\" (이 날만 Gemini가 경쟁사 언급 없이 단독 추천)"}
+      ], note:{ok:false, text:"이 날만 튄 값이에요. 다음 날(8/23)엔 바로 평소 수준으로 돌아왔고, Gemini 한 곳에서만 나타난 변화였어요. 추세로 보지 않아요."} },
+  "q4-6": { day:"8/25", quotes:[
+        {t:"답변 원문", s:"네이버 AI 브리핑 · 8/25", q:"\"강서구 야간진료 치과로 365서울원탑치과가 언급됩니다. 평일 야간 진료를 운영한다는 안내가 확인됩니다…\""}
+      ], note:{ok:false, text:"올랐지만 그 전에 0%로 두 번 돌아간 적이 있어요. 아직 '추세 시작'이라고 부르기보다 '관찰 중인 신호'로 남겨두는 게 안전해요."} }
+};
+function defaultEvidenceB(){ return {day:"8/19~8/25 전체", quotes:[
+    {t:"안내", s:"", q:"위 그래프에서 점을 누르면 그날 그 질문에서 실제로 나온 AI 답변이 여기에 표시돼요."},
+  ], note:null}; }
+
+function renderEvidence(targetId, data) {
+  var el = document.getElementById(targetId);
+  var html = '<div class="ge-top"><p class="ge-eyebrow">선택한 지점</p><p class="ge-day">'+data.day+'</p></div>';
+  html += '<div class="ge-quote-grid' + (data.quotes.length >= 2 ? ' two' : '') + '">';
+  data.quotes.forEach(function(c){
+    html += '<div class="ge-card"><p class="t">'+c.t+'</p><p class="q">'+c.q+'</p>'+(c.s?('<p class="s">'+c.s+'</p>'):'')+'</div>';
+  });
+  html += '</div>';
+  if (data.note) { html += '<div class="ge-note '+(data.note.ok?'ok':'')+'">'+data.note.text+'</div>'; }
+  el.innerHTML = html;
+}
+function onPointClick(chart, key, dayIdx) {
+  if (chart === 'A') {
+    var el = document.getElementById('evidenceA');
+    renderEvidence('evidenceA', EVIDENCE_A[dayIdx] || defaultEvidenceA());
+    el.classList.add('show');
+    requestAnimationFrame(function(){ el.classList.add('in'); });
+    el.scrollIntoView({behavior:'smooth', block:'nearest'});
+  } else {
+    var el2 = document.getElementById('evidenceB');
+    renderEvidence('evidenceB', EVIDENCE_B[key+'-'+dayIdx] || defaultEvidenceB());
+    el2.classList.add('show');
+    requestAnimationFrame(function(){ el2.classList.add('in'); });
+    el2.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+// 그래프 근거 박스는 점을 클릭하기 전까지 표시하지 않음 (onPointClick에서 렌더)
+
+function toggleAcc(id) {
+  var body = document.getElementById('body-' + id);
+  var chev = document.getElementById('chev-' + id);
+  var open = body.classList.contains('open');
+  body.classList.toggle('open', !open);
+  chev.classList.toggle('open', !open);
+}
+
+function select(row, key) {
+  document.querySelectorAll('.frow').forEach(function(r){ r.classList.remove('selected'); });
+  row.classList.add('selected');
+  document.querySelectorAll('.fdata').forEach(function(d){ d.style.display = 'none'; });
+  document.getElementById('fdata-' + key).style.display = 'block';
+  document.querySelector('.detail-panel').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+</script>
+
+
+<script>
+function toggleBrandDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('brand-box').classList.toggle('open');
+}
+document.addEventListener('click', function () {
+  var box = document.getElementById('brand-box');
+  if (box) box.classList.remove('open');
+});
+</script>
+</body>
+</html>

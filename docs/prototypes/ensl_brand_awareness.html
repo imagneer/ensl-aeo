@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 브랜드 인지</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6;
+    --surface-1: #F1EFE8;
+    --surface-2: #FFFFFF;
+    --text-primary: #1A1A18;
+    --text-secondary: #5F5E5A;
+    --text-muted: #8A8880;
+    --border: #E6E4DC;
+    --border-strong: #D3D1C7;
+    --bg-success: #EAF3DE;
+    --text-success: #27500A;
+    --bg-warning: #FBF0DC;
+    --text-warning: #7A4B08;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background: var(--surface-0);
+    color: var(--text-primary);
+    line-height: 1.5;
+  }
+  button {
+    font-family: inherit;
+    background: transparent;
+    border: 0.5px solid var(--border-strong);
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: var(--radius);
+  }
+  button:hover { background: var(--surface-1); }
+
+  .app-shell { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 220px; flex-shrink: 0; background: var(--surface-2);
+    border-right: 0.5px solid var(--border); padding: 1rem;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .logo-row { display: flex; align-items: center; gap: 8px; padding: 8px 8px 16px; }
+  .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); flex-shrink: 0; }
+  .logo-text { font-size: 14px; font-weight: 500; }
+  .brand-box { padding: 8px; margin-bottom: 12px; background: var(--surface-1); border-radius: var(--radius); position: relative; cursor: pointer; }
+  .brand-box .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .brand-box .row i { font-size: 13px; color: var(--text-muted); flex-shrink: 0; transition: transform 0.15s; }
+  .brand-box.open .row i.ti-chevron-down { transform: rotate(180deg); }
+  .brand-dropdown { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface-2); border: 0.5px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(26,26,24,0.10); z-index: 30; overflow: hidden; cursor: default; }
+  .brand-box.open .brand-dropdown { display: block; }
+  .brand-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-size: 13px; color: var(--text-primary); }
+  .brand-item:hover { background: var(--surface-1); }
+  .brand-item.active { color: var(--text-brand); font-weight: 500; }
+  .brand-item i { font-size: 14px; color: var(--text-brand); }
+  .brand-add { display: flex; align-items: center; gap: 7px; padding: 10px 12px; font-size: 12.5px; color: var(--text-secondary); border-top: 0.5px solid var(--border); }
+  .brand-add:hover { background: var(--surface-1); color: var(--text-primary); }
+  .brand-add i { font-size: 13px; color: var(--text-secondary); }
+  .brand-box p { margin: 0; }
+  .brand-box .label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+  .brand-box .name { font-size: 13px; font-weight: 500; }
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav a {
+    display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: var(--radius);
+    color: var(--text-secondary); text-decoration: none; font-size: 13px;
+  }
+  nav a.active { background: var(--surface-1); color: var(--text-primary); font-weight: 500; }
+  nav a i { font-size: 16px; }
+
+  /* Top bar */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; border-bottom: 0.5px solid var(--border); background: var(--surface-2);
+  }
+  .topbar .status { font-size: 13px; color: var(--text-secondary); }
+  .topbar .updated { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+
+  .content { padding: 32px 40px 60px; max-width: 800px; }
+
+  /* Page header */
+  .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
+  .eyebrow { font-size: 12px; color: var(--text-muted); letter-spacing: 0.02em; margin: 0 0 4px; }
+  h1 { font-size: 22px; font-weight: 500; margin: 0; }
+  .date-picker { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 7px 12px; }
+
+  .meta-row { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 28px; }
+  .meta-row span { display: flex; align-items: center; gap: 5px; }
+
+  /* Headline card */
+  .headline-card { background: var(--surface-1); border-radius: 12px; padding: 2rem; margin-bottom: 36px; position: relative; }
+  .headline-card .quote-icon { font-size: 26px; color: var(--text-success); position: absolute; top: 20px; left: 20px; }
+  .headline-card .sub-label { font-size: 13px; color: var(--text-secondary); margin: 0 0 10px; padding-left: 12px; }
+  .headline-sentence { font-size: 25px; font-weight: 500; line-height: 1.5; margin: 0 0 18px; padding-left: 12px; }
+  .badge-row { display: flex; align-items: center; gap: 8px; padding-left: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+
+  .conf-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; padding: 7px 16px; border-radius: 20px; }
+  .conf-badge.confirmed { background: var(--bg-success); color: var(--text-success); }
+  .conf-badge.possible { background: var(--bg-warning); color: var(--text-warning); }
+  .conf-badge.unclear { background: var(--surface-2); color: var(--text-muted); border: 0.5px solid var(--border-strong); }
+  .evidence-btn { font-size: 13px; padding: 7px 16px; }
+
+  .evidence-panel { display: none; margin: 20px 12px 4px; padding-top: 20px; border-top: 0.5px solid var(--border); }
+  .evidence-panel .panel-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .conf-legend { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+  .conf-legend .cl-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+  .conf-legend .cl-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .conf-legend .cl-dot.confirmed { background: var(--text-success); }
+  .conf-legend .cl-dot.possible { background: var(--text-warning); }
+  .conf-legend .cl-dot.unclear { background: var(--text-muted); }
+  .conf-legend .cl-row.current { color: var(--text-primary); font-weight: 500; }
+
+  .criteria-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 18px; }
+  .criteria-cell { border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 12px; text-align: center; }
+  .criteria-cell .k { font-size: 11px; color: var(--text-muted); margin: 0 0 4px; }
+  .criteria-cell .v { font-size: 18px; font-weight: 500; margin: 0 0 2px; }
+  .criteria-cell .t { font-size: 11px; color: var(--text-secondary); margin: 0; }
+  .question-chip { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; margin-bottom: 6px; }
+  .note { font-size: 12px; color: var(--text-muted); margin: 0; }
+  .note i { font-size: 13px; margin-right: 4px; }
+
+  /* Feature cards */
+  h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary); margin: 0 0 4px; }
+  .section-sub { font-size: 12px; color: var(--text-muted); margin: 0 0 14px; }
+  /* AI 일치도 */
+  .consensus-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 40px; align-items: start; }
+  .consensus-col { border: 0.5px solid var(--border-strong); border-radius: 12px; padding: 16px; background: var(--surface-2); }
+  .consensus-col.conflict { border-color: var(--bg-warning); background: #FEFBF3; }
+  .consensus-col.conflict .cc-head { color: var(--text-warning); }
+  .cc-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; margin: 0 0 3px; }
+  .cc-head i { font-size: 15px; }
+  .cc-sub { font-size: 11px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.5; }
+  .consensus-item { padding: 9px 0; border-top: 0.5px solid var(--border); }
+  .consensus-item:first-of-type { border-top: none; padding-top: 0; }
+  .ci-name { font-size: 12.5px; font-weight: 500; margin: 0 0 5px; }
+  .ci-engines { display: flex; gap: 5px; align-items: center; color: var(--text-secondary); flex-wrap: wrap; }
+  .ci-engines .letter { font-size: 11px; font-weight: 500; }
+  .ci-note { font-size: 11px; color: var(--text-muted); margin: 6px 0 0; line-height: 1.55; }
+  .ci-conflict-pair { font-size: 11.5px; line-height: 1.7; }
+  .ci-conflict-pair .who { color: var(--text-secondary); }
+  .ci-conflict-pair .say { color: var(--text-primary); font-weight: 500; }
+  .ci-conflict-vs { text-align: center; font-size: 10px; color: var(--text-warning); margin: 2px 0; }
+
+  /* Full list section */
+  .engine-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; padding: 14px; background: var(--surface-1); border-radius: var(--radius); }
+  .engine-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 64px; }
+  .engine-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); border: 0.5px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-primary); }
+  .engine-icon.letter { font-size: 16px; font-weight: 500; }
+  .engine-item .name { font-size: 10px; color: var(--text-secondary); text-align: center; }
+
+  .full-list { display: flex; flex-direction: column; }
+  .list-row { border-top: 0.5px solid var(--border); }
+  .list-row:last-child { border-bottom: 0.5px solid var(--border); }
+  .row-main { display: flex; align-items: flex-start; justify-content: space-between; padding: 13px 4px; gap: 16px; }
+  .row-left { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .row-title { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .row-name { font-size: 13.5px; font-weight: 500; }
+  .row-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+  .row-stat { font-size: 11px; color: var(--text-muted); margin: 0; }
+  .rep-tag { font-size: 11px; padding: 2px 8px; border-radius: var(--radius); white-space: nowrap; }
+  .rep-tag.in-headline { color: var(--text-success); background: var(--bg-success); }
+  .rep-tag.possible { color: var(--text-warning); background: var(--bg-warning); }
+  .rep-tag.watching { color: var(--text-muted); border: 0.5px solid var(--border-strong); }
+  .row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 1px; }
+  .row-icons { display: flex; gap: 6px; align-items: center; color: var(--text-secondary); }
+  .row-icons .letter { font-size: 12px; font-weight: 500; }
+  .row-toggle { width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; }
+  .row-panel { display: none; padding: 0 4px 12px; }
+  .row-panel p { margin: 0 0 8px; }
+  .row-panel p.link-note { color: var(--text-muted); font-size: 11px; margin-bottom: 0; }
+  .row-panel .evidence-box { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface-2); }
+  .row-panel .src { font-size: 12px; color: var(--text-muted); margin: 0 0 6px; }
+  .row-panel .quote { font-size: 13px; color: var(--text-secondary); line-height: 1.65; margin: 0 0 10px; }
+  .row-panel button { font-size: 12px; width: 100%; }
+
+  .footer-note { font-size: 12px; color: var(--text-muted); margin: 16px 0 0; }
+  .footer-note i { font-size: 13px; margin-right: 5px; }
+
+  /* 완료 마침표 */
+  .done-cta { margin-top: 32px; padding-top: 32px; border-top: 0.5px solid var(--border-strong); }
+  .done-title { font-size: 19px; font-weight: 500; line-height: 1.55; margin: 0 0 20px; }
+  .done-btn { font-size: 13.5px; font-weight: 500; padding: 11px 20px; background: var(--text-primary); color: var(--surface-2); border: none; border-radius: var(--radius); display: inline-flex; align-items: center; gap: 7px; }
+  .done-btn:hover { background: #000; }
+  .done-arrow { transition: transform 0.2s ease; display: inline-block; }
+  .done-btn:hover .done-arrow { transform: translateX(3px); }
+
+  /* 엔슬의 꼬리말 */
+  /* ============================================
+     엔슬의 팁 박스 (Ensl Tip Box)
+     — 모든 화면 하단에 공통으로 쓰는 컴포넌트.
+       재사용 시 .tip-title / .tip-desc / .tip-btn
+       텍스트만 바꾸면 됨. 구조·클래스는 고정.
+     ============================================ */
+  .tip-box { margin: 52px 0 0; border: 0.5px solid var(--border-strong); border-radius: 12px; background: transparent; padding: 24px 26px; }
+  .tip-badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-muted); border: 0.5px solid var(--border-strong); border-radius: 4px; padding: 2px 7px; margin: 0 0 14px; }
+  .tip-title { font-size: 19px; font-weight: 500; color: var(--text-primary); margin: 0 0 8px; line-height: 1.45; }
+  .tip-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0 0 16px; }
+  .tip-btn {
+    font-size: 13px; padding: 0; border: none; background: transparent;
+    color: var(--text-primary); font-weight: 500; display: inline-flex;
+    align-items: center; gap: 6px; border-bottom: 1px solid var(--border-strong);
+    border-radius: 0; padding-bottom: 3px; transition: border-color 0.2s;
+  }
+  .tip-btn:hover { background: transparent; border-bottom-color: var(--text-primary); }
+  .tip-arrow { display: inline-block; transition: transform 0.2s ease; font-size: 12px; }
+  .tip-btn:hover .tip-arrow { transform: translate(2px, -2px); }
+
+  /* 모달 시각 요소 */
+  .modal-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--bg-success); color: var(--text-success); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+
+  .modal-tip { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+  .mt-num { width: 22px; height: 22px; border-radius: 50%; border: 0.5px solid var(--border-strong); color: var(--text-muted); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; flex-shrink: 0; margin-top: 1px; }
+  .mt-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .mt-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+
+  .modal-closing { background: var(--surface-1); border-radius: var(--radius); padding: 14px 16px; border-top: 2px solid var(--text-primary); display: flex; gap: 12px; align-items: flex-start; }
+  .mc-icon { width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); color: var(--text-primary); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .mc-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+  .mc-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+<defs>
+<symbol id="ic-sparkle" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 L14.3 9.7 L22 12 L14.3 14.3 L12 22 L9.7 14.3 L2 12 L9.7 9.7 Z"/></symbol>
+<symbol id="ic-asterisk" viewBox="0 0 24 24">
+<rect x="10.6" y="2" width="2.8" height="20" rx="1.4" fill="currentColor"/>
+<rect x="10.6" y="2" width="2.8" height="20" rx="1.4" fill="currentColor" transform="rotate(60 12 12)"/>
+<rect x="10.6" y="2" width="2.8" height="20" rx="1.4" fill="currentColor" transform="rotate(120 12 12)"/>
+</symbol>
+<symbol id="ic-burst" viewBox="0 0 24 24">
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor"/>
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor" transform="rotate(45 12 12)"/>
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor" transform="rotate(90 12 12)"/>
+<rect x="11.1" y="1.5" width="1.8" height="21" rx="0.9" fill="currentColor" transform="rotate(135 12 12)"/>
+</symbol>
+<symbol id="ic-knot" viewBox="0 0 24 24">
+<circle cx="12" cy="6.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+<circle cx="7" cy="15" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+<circle cx="17" cy="15" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+</symbol>
+</defs>
+</svg>
+
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo-row">
+      <div class="logo-mark"></div>
+      <span class="logo-text">ensl</span>
+    </div>
+    <div class="brand-box" id="brand-box" onclick="toggleBrandDropdown(event)">
+      <p class="label">진단 중인 브랜드</p>
+      <div class="row"><p class="name">365서울원탑치과</p><i class="ti ti-chevron-down"></i></div>
+      <div class="brand-dropdown">
+        <div class="brand-item active">365서울원탑치과<i class="ti ti-check"></i></div>
+        <div class="brand-add" onclick="window.location.href='ensl_onboarding_step1.html'"><i class="ti ti-plus"></i>새 브랜드 추가</div>
+      </div>
+    </div>
+    <nav>
+      <a href="ensl_brand_awareness.html" class="active"><i class="ti ti-message-2"></i>브랜드 인지</a>
+      <a href="ensl_brand_position.html"><i class="ti ti-target-arrow"></i>브랜드 현 위치</a>
+      <a href="ensl_gap_screen.html"><i class="ti ti-git-compare"></i>인지와 위치의 간극</a>
+      <a href="ensl_trend_screen.html"><i class="ti ti-trending-up"></i>변화 추이</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="status">진단 7일차 · 7일 중</span>
+      <span class="updated"><i class="ti ti-clock"></i>18:00 기준 업데이트</span>
+    </div>
+
+    <div class="content">
+
+      <div class="page-header">
+        <div>
+          <p class="eyebrow">브랜드 한 줄</p>
+          <h1>AI는 브랜드를 어떻게 인지하고 있나</h1>
+        </div>
+        <button class="date-picker"><i class="ti ti-calendar"></i>1차 진단 · 8월 19일–25일<i class="ti ti-chevron-down"></i></button>
+      </div>
+
+      <div class="meta-row">
+        <span><i class="ti ti-robot"></i>AI 6개</span>
+        <span><i class="ti ti-help-circle"></i>인지 질문 3개</span>
+        <span><i class="ti ti-circle-check"></i>7일 관측 완료</span>
+      </div>
+
+      <!-- 1. 헤드라인: AI가 기억하는 브랜드 한 줄 -->
+      <div class="headline-card">
+        <i class="ti ti-quote quote-icon"></i>
+        <p class="sub-label">AI가 기억하는 우리 브랜드의 한 줄</p>
+        <p class="headline-sentence">"강서구에서 전체 임플란트와 정밀 보철을 함께 맡길 수 있는 자체 기공소 보유 치과"</p>
+        <div class="badge-row">
+          <span class="conf-badge confirmed"><i class="ti ti-check"></i>반복 확인됨</span>
+          <button class="evidence-btn" onclick="toggle('headline-evidence', this, '이 한 줄의 근거 보기 →', '근거 접기 ↑')">이 한 줄의 근거 보기 →</button>
+        </div>
+        <div id="headline-evidence" class="evidence-panel">
+          <p class="panel-title">확신 수준은 이렇게 나눠요</p>
+          <div class="conf-legend">
+            <div class="cl-row current"><span class="cl-dot confirmed"></span>반복 확인됨 — 인지 질문 2개↑ · AI 3개↑ · 관측 3일↑ 모두 충족 (현재 상태)</div>
+            <div class="cl-row"><span class="cl-dot possible"></span>가능성이 보임 — 일부 기준만 충족, 더 지켜봐야 함</div>
+            <div class="cl-row"><span class="cl-dot unclear"></span>아직 판단하기 어려움 — 기준 미달, 문장을 만들지 않음</div>
+          </div>
+          <p class="panel-title">지금 진단은 이 기준과 비교하면</p>
+          <div class="criteria-grid">
+            <div class="criteria-cell"><p class="k">인지 질문</p><p class="v">3 / 3개</p><p class="t">기준 2개 이상 ✓</p></div>
+            <div class="criteria-cell"><p class="k">AI 엔진</p><p class="v">6 / 6개</p><p class="t">기준 3개 이상 ✓</p></div>
+            <div class="criteria-cell"><p class="k">관측 일수</p><p class="v">7 / 7일</p><p class="t">기준 3일 이상 ✓</p></div>
+          </div>
+          <p class="note" style="margin: -8px 0 18px;">한 줄을 구성하는 네 특징(강서구·자체 기공소·전체 임플란트·정밀 보철)은 <strong style="color:var(--text-primary);">각각</strong> 이 기준(AI 3개·3일 이상)을 넘겨서 확정됐어요. 특징별 정확한 관측 수는 아래 특징 목록에서 하나씩 확인할 수 있어요.</p>
+          <p class="panel-title">근거가 된 인지 질문</p>
+          <div class="question-chip">"365서울원탑치과 어때?"</div>
+          <div class="question-chip">"365서울원탑치과 임플란트 잘해?"</div>
+          <div class="question-chip">"강서구 365서울원탑치과 알아?"</div>
+          <p class="note" style="margin-top:8px;"><i class="ti ti-info-circle"></i>표현 하나하나의 실제 AI 답변 원문은 아래 특징 목록에서 확인할 수 있어요.</p>
+        </div>
+      </div>
+
+      <!-- 2. 브랜드 특징 (대표 + 전체 통합) -->
+      <h2 class="section-title" style="margin-bottom:4px;">브랜드 한 줄을 만든 특징</h2>
+      <p class="section-sub">비슷한 표현은 하나로 합쳤어요. 확정 기준(AI 3개 이상 · 관측 3일 이상)을 넘은 특징만 브랜드 한 줄에 들어가요.</p>
+
+      <div class="engine-legend">
+        <div class="engine-item"><span class="engine-icon"><svg width="18" height="18"><use href="#ic-sparkle"/></svg></span><span class="name">Gemini</span></div>
+        <div class="engine-item"><span class="engine-icon"><svg width="18" height="18"><use href="#ic-knot"/></svg></span><span class="name">ChatGPT</span></div>
+        <div class="engine-item"><span class="engine-icon"><svg width="18" height="18"><use href="#ic-asterisk"/></svg></span><span class="name">Claude</span></div>
+        <div class="engine-item"><span class="engine-icon"><svg width="18" height="18"><use href="#ic-burst"/></svg></span><span class="name">Perplexity</span></div>
+        <div class="engine-item"><span class="engine-icon letter">G</span><span class="name">구글 AI 개요</span></div>
+        <div class="engine-item"><span class="engine-icon letter">N</span><span class="name">네이버 AI 브리핑</span></div>
+      </div>
+
+      <div class="full-list">
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left">
+              <div class="row-title"><span class="row-name">강서구</span><span class="rep-tag in-headline">브랜드 한 줄에 반영됨</span></div>
+              <p class="row-desc">서울 강서구의 지역 치과로 반복해서 나타나요.</p>
+              <p class="row-stat">7일 중 7일 확인 · AI 6개 전체</p>
+            </div>
+            <div class="row-right">
+              <div class="row-icons"><svg width="15" height="15"><use href="#ic-sparkle"/></svg><svg width="15" height="15"><use href="#ic-knot"/></svg><svg width="15" height="15"><use href="#ic-asterisk"/></svg><svg width="15" height="15"><use href="#ic-burst"/></svg><span class="letter">G</span><span class="letter">N</span></div>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('r1-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="r1-panel" class="row-panel">
+            <div class="evidence-box">
+              <p class="src">실제 근거 · 네이버 AI 브리핑 · 8월 23일 · 출처: 네이버 플레이스</p>
+              <p class="quote">"서울 강서구 지역에서 임플란트로 알려진 365서울원탑치과가 위치해 있다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left">
+              <div class="row-title"><span class="row-name">자체 기공소</span><span class="rep-tag in-headline">브랜드 한 줄에 반영됨</span></div>
+              <p class="row-desc">기공소를 직접 운영해 보철물 제작이 빠르다는 점으로 인지되고 있어요.</p>
+              <p class="row-stat">7일 중 6일 확인 · AI 5개</p>
+            </div>
+            <div class="row-right">
+              <div class="row-icons"><svg width="15" height="15"><use href="#ic-sparkle"/></svg><svg width="15" height="15"><use href="#ic-knot"/></svg><svg width="15" height="15"><use href="#ic-asterisk"/></svg><svg width="15" height="15"><use href="#ic-burst"/></svg><span class="letter">N</span></div>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('r2-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="r2-panel" class="row-panel">
+            <div class="evidence-box">
+              <p class="src">실제 근거 · Claude · 8월 25일 · 출처: 병원 홈페이지</p>
+              <p class="quote">"자체 기공 시스템을 운영해 보철물 제작 기간이 짧다는 점이 자주 언급된다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left">
+              <div class="row-title"><span class="row-name">전체 임플란트</span><span class="rep-tag in-headline">브랜드 한 줄에 반영됨</span></div>
+              <p class="row-desc">특정 케이스가 아니라 임플란트 진료 전반에서 신뢰받는 것으로 인지돼요.</p>
+              <p class="row-stat">7일 중 5일 확인 · AI 4개</p>
+            </div>
+            <div class="row-right">
+              <div class="row-icons"><svg width="15" height="15"><use href="#ic-sparkle"/></svg><svg width="15" height="15"><use href="#ic-knot"/></svg><svg width="15" height="15"><use href="#ic-burst"/></svg><span class="letter">N</span></div>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('r3-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="r3-panel" class="row-panel">
+            <div class="evidence-box">
+              <p class="src">실제 근거 · Perplexity · 8월 25일 · 출처: 네이버 플레이스</p>
+              <p class="quote">"임플란트 진료 경험이 많다는 점이 근거로 제시된다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left">
+              <div class="row-title"><span class="row-name">정밀 보철</span><span class="rep-tag in-headline">브랜드 한 줄에 반영됨</span></div>
+              <p class="row-desc">임플란트와 함께 정밀한 보철 치료를 같이 받을 수 있는 곳으로 언급돼요.</p>
+              <p class="row-stat">7일 중 4일 확인 · AI 3개</p>
+            </div>
+            <div class="row-right">
+              <div class="row-icons"><svg width="15" height="15"><use href="#ic-knot"/></svg><svg width="15" height="15"><use href="#ic-asterisk"/></svg><svg width="15" height="15"><use href="#ic-burst"/></svg></div>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('r4-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="r4-panel" class="row-panel">
+            <div class="evidence-box">
+              <p class="src">실제 근거 · ChatGPT · 8월 23일 · 출처: 병원 홈페이지</p>
+              <p class="quote">"정밀 보철 제작까지 한 곳에서 진행할 수 있다는 점이 언급된다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left">
+              <div class="row-title"><span class="row-name">규모 있는 진료 체계</span><span class="rep-tag possible">가능성이 보임</span></div>
+              <p class="row-desc">여러 진료과가 함께 있는 규모 있는 치과로 인지되고 있어요.</p>
+              <p class="row-stat">7일 중 3일 확인 · AI 2개</p>
+            </div>
+            <div class="row-right">
+              <div class="row-icons"><svg width="15" height="15"><use href="#ic-sparkle"/></svg><svg width="15" height="15"><use href="#ic-burst"/></svg></div>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('r5-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="r5-panel" class="row-panel">
+            <div class="evidence-box">
+              <p class="src">실제 근거 · Gemini · 8월 22일 · 출처: 지역 블로그</p>
+              <p class="quote">"여러 층으로 구성된 규모 있는 치과로, 다양한 장비를 갖추고 있다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left">
+              <div class="row-title"><span class="row-name">전문 진료 중심</span><span class="rep-tag watching">아직 관찰 중</span></div>
+              <p class="row-stat">7일 중 2일 확인 · AI 2개</p>
+            </div>
+            <div class="row-right">
+              <div class="row-icons"><span class="letter">N</span><span class="letter">G</span></div>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('r6-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="r6-panel" class="row-panel">
+            <div class="evidence-box">
+              <p class="src">실제 근거 · 네이버 AI 브리핑 · 8월 21일 · 출처: 네이버 플레이스</p>
+              <p class="quote">"특정 진료 분야에 집중하는 전문 치과로 소개된다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 3. AI들의 인지 일치 정도 -->
+      <h2 class="section-title" style="margin-bottom:4px; margin-top:40px;">AI들이 얼마나 같은 이야기를 하고 있나</h2>
+      <p class="section-sub">모든 AI가 공통으로 말하는 것과, 일부만 말하는 것, 서로 다르게 설명하는 지점을 구분했어요.</p>
+      <div class="consensus-grid">
+
+        <div class="consensus-col">
+          <p class="cc-head"><i class="ti ti-circles" style="color:var(--text-success);"></i>모든 AI가 공통으로 확인한 정보</p>
+          <p class="cc-sub">6개 AI 전부가 같은 방향으로 말해요</p>
+          <div class="consensus-item">
+            <p class="ci-name">강서구</p>
+            <div class="ci-engines">
+              <svg width="14" height="14"><use href="#ic-sparkle"/></svg>
+              <svg width="14" height="14"><use href="#ic-knot"/></svg>
+              <svg width="14" height="14"><use href="#ic-asterisk"/></svg>
+              <svg width="14" height="14"><use href="#ic-burst"/></svg>
+              <span class="letter">G</span><span class="letter">N</span>
+            </div>
+            <p class="ci-note">6개 AI 전체에서 확인, 예외 없음</p>
+          </div>
+        </div>
+
+        <div class="consensus-col">
+          <p class="cc-head"><i class="ti ti-adjustments" style="color:var(--text-secondary);"></i>일부 AI에서만</p>
+          <p class="cc-sub">특정 엔진에서만 반복해서 나와요</p>
+          <div class="consensus-item">
+            <p class="ci-name">정밀 보철</p>
+            <div class="ci-engines">
+              <svg width="14" height="14"><use href="#ic-knot"/></svg>
+              <svg width="14" height="14"><use href="#ic-asterisk"/></svg>
+              <svg width="14" height="14"><use href="#ic-burst"/></svg>
+            </div>
+            <p class="ci-note">ChatGPT · Claude · Perplexity에서 확인, 나머지 3개는 언급 없음</p>
+          </div>
+          <div class="consensus-item">
+            <p class="ci-name">규모 있는 진료 체계</p>
+            <div class="ci-engines">
+              <svg width="14" height="14"><use href="#ic-sparkle"/></svg>
+              <svg width="14" height="14"><use href="#ic-burst"/></svg>
+            </div>
+            <p class="ci-note">Gemini · Perplexity에서만 확인, 나머지 4개는 언급 없음</p>
+          </div>
+        </div>
+
+        <div class="consensus-col conflict">
+          <p class="cc-head"><i class="ti ti-alert-triangle"></i>서로 다르게 설명하는 지점</p>
+          <p class="cc-sub">같은 브랜드를 반대되는 인상으로 설명해요</p>
+          <div class="consensus-item">
+            <p class="ci-conflict-pair"><span class="who">Gemini</span> · <span class="say">"규모 있는 종합 치과"</span></p>
+            <p class="ci-conflict-vs">↕ 상반된 인상</p>
+            <p class="ci-conflict-pair"><span class="who">네이버 AI 브리핑</span> · <span class="say">"임플란트만 집중하는 전문 치과"</span></p>
+            <p class="ci-note">규모가 큰 곳인지, 한 가지에 집중하는 곳인지 AI마다 반대로 설명하고 있어요.</p>
+          </div>
+        </div>
+
+      </div>
+      <!-- 4. 근거: 인지 질문과 실제 답변 -->
+      <h2 class="section-title" style="margin-bottom:4px; margin-top:40px;">무엇을 근거로 판단했을까?</h2>
+      <p class="section-sub">위 결론의 바탕이 된 인지 질문 3개예요. 항목을 열면 어떤 AI가 답했는지와 실제 답변·출처가 나와요.</p>
+
+      <div class="full-list" style="margin-bottom:40px;">
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left"><span class="row-name">"365서울원탑치과 어때?"</span></div>
+            <div class="row-right">
+              <span class="rep-tag" style="border-color:transparent; background:var(--bg-success); color:var(--text-success);">7일 중 7일 응답</span>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('q1-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="q1-panel" class="row-panel">
+            <div class="row-icons" style="margin-bottom:10px;"><svg width="15" height="15"><use href="#ic-sparkle"/></svg><svg width="15" height="15"><use href="#ic-knot"/></svg><svg width="15" height="15"><use href="#ic-asterisk"/></svg><svg width="15" height="15"><use href="#ic-burst"/></svg><span class="letter">G</span><span class="letter">N</span></div>
+            <div class="evidence-box">
+              <p class="src">실제 근거 · Gemini · 8월 24일 · 출처: 병원 홈페이지</p>
+              <p class="quote">"강서구에 위치한 규모 있는 치과로, 자체 기공소를 운영해 보철물 제작이 빠르다는 점이 소개된다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left"><span class="row-name">"365서울원탑치과 임플란트 잘해?"</span></div>
+            <div class="row-right">
+              <span class="rep-tag" style="border-color:transparent; background:var(--bg-success); color:var(--text-success);">7일 중 6일 응답</span>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('q2-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="q2-panel" class="row-panel">
+            <div class="row-icons" style="margin-bottom:10px;"><svg width="15" height="15"><use href="#ic-knot"/></svg><svg width="15" height="15"><use href="#ic-burst"/></svg><span class="letter">N</span></div>
+            <div class="evidence-box">
+              <p class="src">실제 근거 · Perplexity · 8월 25일 · 출처: 네이버 플레이스, 병원 홈페이지</p>
+              <p class="quote">"임플란트 진료 경험이 많고, 정밀 보철까지 함께 진행할 수 있다는 점이 근거로 제시된다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-row">
+          <div class="row-main">
+            <div class="row-left"><span class="row-name">"강서구 365서울원탑치과 알아?"</span></div>
+            <div class="row-right">
+              <span class="rep-tag" style="border-color:transparent; background:var(--bg-warning); color:var(--text-warning);">7일 중 4일 응답</span>
+              <button class="row-toggle" aria-label="근거 보기" onclick="toggleIcon('q3-panel', this)"><i class="ti ti-chevron-down"></i></button>
+            </div>
+          </div>
+          <div id="q3-panel" class="row-panel">
+            <div class="row-icons" style="margin-bottom:10px;"><span class="letter">G</span><span class="letter">N</span></div>
+            <div class="evidence-box">
+              <p class="src">실제 근거 · 네이버 AI 브리핑 · 8월 23일 · 출처: 네이버 플레이스</p>
+              <p class="quote">"서울 강서구 지역에서 임플란트로 알려진 365서울원탑치과가 위치해 있다…"</p>
+              <button onclick="window.location.href='ensl_query_detail.html'">전체 답변과 출처 보기 ↗</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 엔슬의 꼬리말 -->
+      <div class="tip-box">
+        <span class="tip-badge">TIP</span>
+        <p class="tip-title">AI의 기억에도 버릇이 있어요.</p>
+        <p class="tip-desc">이번 진단에서 '강서구'는 6개 AI 모두가 기억했지만, 구글 AI 개요는 브랜드 한 줄을 만든 4개 특징 중 '강서구'만 언급했어요. 같은 브랜드라도 AI마다 기억하는 정보의 폭은 달라질 수 있어요.</p>
+        <button class="tip-btn" id="tips-btn" onclick="openTips()">AI의 기억 다루는 법 <span class="tip-arrow">↗</span></button>
+      </div>
+
+      <!-- 완료 마침표: 다음 화면 이동 -->
+      <div class="done-cta">
+        <p class="done-title">AI의 기억 속 365서울원탑치과를 확인했어요.<br>이제, 어떤 자리 질문에서 등장하는지 볼 차례예요.</p>
+        <button class="done-btn" onclick="window.location.href='ensl_brand_position.html'">브랜드 현 위치 보러가기 <span class="done-arrow">→</span></button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Tips Modal -->
+<div id="tips-modal" style="display:none; position:fixed; inset:0; background:rgba(26,26,24,0.4); z-index:50; align-items:center; justify-content:center; padding:20px;" onclick="if(event.target===this) closeTips();">
+  <div style="background:var(--surface-2); border-radius:12px; max-width:520px; width:100%; max-height:80vh; overflow-y:auto; padding:28px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:22px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span class="modal-mark"><i class="ti ti-bulb"></i></span>
+        <h2 style="font-size:19px; font-weight:500; margin:0;">AI의 기억 다루는 법</h2>
+      </div>
+      <button onclick="closeTips()" style="border:none; padding:4px; font-size:18px; line-height:1; color:var(--text-muted);">✕</button>
+    </div>
+
+
+    <div class="modal-tip">
+      <span class="mt-num">1</span>
+      <div>
+        <p class="mt-title">핵심 표현 맞추기</p>
+        <p class="mt-desc">홈페이지에서는 "자체 기공소", 블로그에서는 "기공 시스템", 보도자료에서는 "인하우스 랩"이라고 쓰면 하나의 특징으로 안정적으로 반복되지 않을 수 있어요. 기억되고 싶은 표현 하나를 정해서 어디서나 같은 말로 쓰세요.</p>
+      </div>
+    </div>
+    <div class="modal-tip">
+      <span class="mt-num">2</span>
+      <div>
+        <p class="mt-title">확인 가능한 사실 남기기</p>
+        <p class="mt-desc">"최고의 임플란트"는 AI가 인용하기 어려운 주장이에요. "원내 기공소에서 보철물을 직접 제작"처럼 확인 가능한 사실이 답변에 실려요.</p>
+      </div>
+    </div>
+    <div class="modal-tip">
+      <span class="mt-num">3</span>
+      <div>
+        <p class="mt-title">채널별 소개 정리하기</p>
+        <p class="mt-desc">AI마다 답변에 사용하는 출처가 다를 수 있어요. 채널마다 소개 문구가 다르면 AI별 기억도 따로 갈라질 수 있으니, 홈페이지·플레이스·보도자료의 브랜드 소개를 한 번 맞춰보세요.</p>
+      </div>
+    </div>
+    <div class="modal-tip" style="margin-bottom:20px;">
+      <span class="mt-num">4</span>
+      <div>
+        <p class="mt-title">상반된 표현의 우선순위 정하기</p>
+        <p class="mt-desc">"종합 치과"와 "임플란트 전문"을 동시에 강조하면 AI마다 다른 쪽을 골라 기억해요. 둘 중 무엇이 먼저 떠오르길 원하는지 정하고, 나머지는 뒤에 놓으세요.</p>
+      </div>
+    </div>
+
+    <div class="modal-closing">
+      <span class="mc-icon"><i class="ti ti-clock-play"></i></span>
+      <div>
+        <p class="mc-title">바꾼 효과는 다음 진단에서 확인돼요</p>
+        <p class="mc-desc">AI가 새 정보를 반영하는 데는 시간이 걸려요. 진단 질문은 그대로 두고 브랜드가 남기는 정보만 바꿔야, <strong style="color:var(--text-primary);">변화 추이에서 무엇 때문에 달라졌는지 비교할 수 있어요.</strong></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openTips() {
+    document.getElementById('tips-modal').style.display = 'flex';
+  }
+  function closeTips() {
+    document.getElementById('tips-modal').style.display = 'none';
+  }
+  function toggle(id, btn, closedText, openText) {
+    var p = document.getElementById(id);
+    var isOpen = p.style.display === 'block';
+    p.style.display = isOpen ? 'none' : 'block';
+    btn.innerHTML = isOpen ? closedText : openText;
+  }
+  function toggleIcon(id, btn) {
+    var p = document.getElementById(id);
+    var isOpen = p.style.display === 'block';
+    p.style.display = isOpen ? 'none' : 'block';
+    var icon = btn.querySelector('i');
+    if (icon) icon.className = isOpen ? 'ti ti-chevron-down' : 'ti ti-chevron-up';
+  }
+</script>
+
+
+<script>
+function toggleBrandDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('brand-box').classList.toggle('open');
+}
+document.addEventListener('click', function () {
+  var box = document.getElementById('brand-box');
+  if (box) box.classList.remove('open');
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 내부 — 판정 검토</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6; --surface-1: #F1EFE8; --surface-2: #FFFFFF;
+    --text-primary: #1A1A18; --text-secondary: #5F5E5A; --text-muted: #8A8880;
+    --border: #E6E4DC; --border-strong: #D3D1C7;
+    --bg-success: #EAF3DE; --text-success: #27500A;
+    --bg-warning: #FBF0DC; --text-warning: #7A4B08;
+    --brand: #00A4B8; --bg-brand: #DAEEF1; --text-brand: #007685;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--surface-0); color: var(--text-primary); line-height: 1.5; }
+  button, textarea { font-family: inherit; }
+  button { background: transparent; border: 0.5px solid var(--border-strong); color: var(--text-primary); cursor: pointer; border-radius: var(--radius); padding: 6px 12px; }
+  button:hover { background: var(--surface-1); }
+
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 0.5px solid var(--border); background: var(--surface-2); }
+  .logo-mark { width: 24px; height: 24px; border-radius: 7px; background: var(--text-primary); flex-shrink: 0; }
+  .topbar .name { font-size: 13.5px; font-weight: 500; }
+  .internal-badge { font-size: 11px; color: var(--text-muted); border: 0.5px solid var(--border-strong); border-radius: 20px; padding: 2px 10px; }
+  .topbar .brand-ctx { font-size: 12.5px; color: var(--text-muted); margin-left: auto; }
+
+  .shell { display: flex; height: calc(100vh - 49px); }
+
+  /* 왼쪽: 대기 목록 */
+  .queue { width: 320px; flex-shrink: 0; border-right: 0.5px solid var(--border); overflow-y: auto; padding: 16px; }
+  .queue-label { font-size: 11.5px; color: var(--text-muted); margin: 0 0 12px; padding: 0 4px; }
+  .q-item { padding: 12px 13px; border-radius: var(--radius); cursor: pointer; margin-bottom: 4px; }
+  .q-item:hover { background: var(--surface-1); }
+  .q-item.selected { background: var(--surface-1); }
+  .q-item .src { font-size: 10.5px; color: var(--text-muted); margin: 0 0 4px; }
+  .q-item .ttl { font-size: 13px; font-weight: 500; margin: 0 0 6px; line-height: 1.4; }
+  .q-item .status { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
+  .q-item .status.pending { background: var(--bg-warning); color: var(--text-warning); }
+  .q-item .status.approved { background: var(--bg-success); color: var(--text-success); }
+  .q-item .status.held { background: var(--surface-1); color: var(--text-muted); border: 0.5px solid var(--border-strong); }
+
+  /* 오른쪽: 상세 패널 */
+  .detail { flex: 1; overflow-y: auto; padding: 32px 40px; max-width: 720px; }
+  .d-eyebrow { font-size: 12px; color: var(--text-muted); margin: 0 0 6px; }
+  .d-title { font-size: 20px; font-weight: 500; margin: 0 0 20px; line-height: 1.4; }
+
+  .d-block { margin-bottom: 26px; }
+  .d-block .k { font-size: 11.5px; color: var(--text-muted); margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
+  .d-block .v { font-size: 13.5px; color: var(--text-secondary); line-height: 1.7; margin: 0; }
+
+  .confidence-row { display: flex; gap: 8px; }
+  .conf-pill { font-size: 12px; padding: 6px 13px; border-radius: 20px; border: 0.5px solid var(--border-strong); color: var(--text-muted); }
+  .conf-pill.active.confirmed { background: var(--bg-success); color: var(--text-success); border-color: transparent; font-weight: 500; }
+  .conf-pill.active.possible { background: var(--bg-warning); color: var(--text-warning); border-color: transparent; font-weight: 500; }
+  .conf-pill.active.unclear { background: var(--surface-1); color: var(--text-muted); border-color: transparent; font-weight: 500; }
+
+  .evidence-box { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 13px 15px; background: var(--surface-2); margin-bottom: 8px; }
+  .evidence-box .src { font-size: 11.5px; color: var(--text-muted); margin: 0 0 8px; }
+  .evidence-box .quote { font-size: 13px; line-height: 1.65; margin: 0 0 10px; }
+  .evidence-box .quote.full { display: none; }
+  .evidence-box .src-links { font-size: 11px; color: var(--text-muted); margin: 0 0 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .evidence-box .src-links a { color: var(--text-secondary); text-decoration: underline; text-underline-offset: 2px; }
+  .evidence-box .src-links a:hover { color: var(--text-primary); }
+  .evidence-box .expand-btn { font-size: 11.5px; width: 100%; padding: 5px; }
+  mark.hl { background: var(--bg-brand); color: var(--text-brand); padding: 1px 3px; border-radius: 3px; font-weight: 500; }
+
+  .edit-box { width: 100%; font-size: 13.5px; padding: 12px 14px; border: 0.5px solid var(--border-strong); border-radius: var(--radius); line-height: 1.65; resize: vertical; min-height: 68px; color: var(--text-primary); }
+  .edit-box:focus { outline: none; border-color: var(--text-primary); }
+  .edited-flag { display: none; align-items: center; gap: 5px; font-size: 11px; color: var(--text-brand); margin-top: 8px; }
+  .edited-flag.show { display: flex; }
+
+  .action-row { display: flex; gap: 8px; padding-top: 20px; border-top: 0.5px solid var(--border); margin-top: 8px; }
+  .hold-btn { font-size: 13px; color: var(--text-secondary); }
+  .approve-btn { font-size: 13.5px; font-weight: 500; color: var(--surface-2); background: var(--text-primary); border: none; flex: 1; }
+  .approve-btn:hover { background: #000; }
+
+  .hold-reason-box { display: none; background: var(--surface-1); border-radius: var(--radius); padding: 16px; margin-top: 8px; }
+  .hold-reason-box .k { font-size: 11.5px; color: var(--text-muted); margin: 0 0 8px; }
+  .hold-reason-box .edit-box { min-height: 60px; background: var(--surface-2); }
+
+  .done-state { display: none; align-items: center; gap: 10px; padding: 14px 16px; border-radius: var(--radius); font-size: 13px; }
+  .done-state.approved { background: var(--bg-success); color: var(--text-success); }
+  .done-state.held { background: var(--surface-1); color: var(--text-muted); }
+  .done-state.show { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo-mark"></div>
+  <span class="name">ensl</span>
+  <span class="internal-badge">내부용 · 검토 &amp; 승인</span>
+  <span class="brand-ctx">365서울원탑치과 · 1차 진단 (8/19~8/25)</span>
+</div>
+
+<div class="shell">
+
+  <!-- 왼쪽: 대기 목록 -->
+  <div class="queue">
+    <p class="queue-label">승인 대기 3건</p>
+
+    <div class="q-item selected" onclick="selectItem(this, 'q1')">
+      <p class="src">인지와 위치의 간극</p>
+      <p class="ttl">전문의 협진 → 선택 이유로 이어지지 않음</p>
+      <span class="status pending">대기중</span>
+    </div>
+
+    <div class="q-item" onclick="selectItem(this, 'q2')">
+      <p class="src">브랜드 인지</p>
+      <p class="ttl">브랜드 한 줄: 강서구·자체 기공소·전체 임플란트·정밀 보철 반영</p>
+      <span class="status pending">대기중</span>
+    </div>
+
+    <div class="q-item" onclick="selectItem(this, 'q3')">
+      <p class="src">변화 추이</p>
+      <p class="ttl">'강서구 임플란트' 8/22 스파이크 → 일시적 흔들림으로 분류</p>
+      <span class="status pending">대기중</span>
+    </div>
+  </div>
+
+  <!-- 오른쪽: 상세 -->
+  <div class="detail">
+
+    <!-- q1 -->
+    <div id="detail-q1" class="detail-panel">
+      <p class="d-eyebrow">인지와 위치의 간극 · AI 제안 판정</p>
+      <h1 class="d-title">"전문의 협진"은 AI가 알고 있지만, 선택 이유로는 이어지지 않았어요.</h1>
+
+      <div class="d-block">
+        <p class="k">선택 이유</p>
+        <p class="v">인지 질문 답변 42건 중 31건(74%)에서 "전문의 협진"이 언급됐지만, "고난도 임플란트를 잘하는 치과는?" 자리 질문의 실제 선택 이유 34건 중 이 표현이 등장한 경우는 0건이었어요. 인지도는 높은데 선택 근거로는 쓰이지 않는 패턴이에요.</p>
+      </div>
+
+      <div class="d-block">
+        <p class="k">확신도</p>
+        <div class="confidence-row">
+          <span class="conf-pill active confirmed">반복 확인됨</span>
+          <span class="conf-pill">가능성이 보임</span>
+          <span class="conf-pill">판단하기 어려움</span>
+        </div>
+      </div>
+
+      <div class="d-block">
+        <p class="k">사용한 근거 답변</p>
+        <div class="evidence-box">
+          <p class="src">ChatGPT · 8월 20일 · 인지 질문</p>
+          <p class="quote short">"365서울원탑치과는 <mark class="hl">여러 전문 분야의 원장진이 함께 진료하는 협진 체계</mark>를 운영하는 치과로 소개됩니다…"</p>
+          <p class="quote full">"365서울원탑치과는 <mark class="hl">여러 전문 분야의 원장진이 함께 진료하는 협진 체계</mark>를 운영하는 치과로 소개됩니다. 임플란트, 보철, 교정 등 각 분야 전문의가 케이스에 따라 협진하는 방식이라는 설명이 포함되어 있습니다."</p>
+          <p class="src-links">출처 <a href="https://onetopdental.com" target="_blank" rel="noopener">병원 홈페이지 ↗</a></p>
+          <button class="expand-btn" onclick="toggleEvidence(this)">전체 보기 ↓</button>
+        </div>
+        <div class="evidence-box">
+          <p class="src">Gemini · 8월 23일 · 자리 질문("고난도 임플란트를 잘하는 치과는?")</p>
+          <p class="quote short">"강서구 임플란트로는 365서울원탑치과가 자주 언급됩니다. <mark class="hl">고난도 케이스 경험과 자체 기공 시스템</mark>을 갖추고 있어 복잡한 치료에도 대응이 가능하다고 소개됩니다…" (전문의 협진 언급 없음)</p>
+          <p class="quote full">"강서구 임플란트로는 365서울원탑치과가 자주 언급됩니다. <mark class="hl">고난도 케이스 경험과 자체 기공 시스템</mark>을 갖추고 있어 복잡한 치료에도 대응이 가능하다고 소개됩니다. 전문의 협진에 대한 언급은 이 답변에서는 확인되지 않았습니다."</p>
+          <p class="src-links">출처 <a href="https://map.naver.com/p/search/365서울원탑치과" target="_blank" rel="noopener">네이버 플레이스 ↗</a> <a href="https://cafe.naver.com/gangseoresident" target="_blank" rel="noopener">지역 커뮤니티 ↗</a></p>
+          <button class="expand-btn" onclick="toggleEvidence(this)">전체 보기 ↓</button>
+        </div>
+      </div>
+
+      <div class="d-block">
+        <p class="k">공개될 문장 (수정 가능)</p>
+        <textarea class="edit-box" id="edit-q1" oninput="onEdit('q1')">AI는 365서울원탑치과의 전문의 협진 체계를 알고 있어요. 하지만 고난도 임플란트 치과를 추천하는 상황에서는 이 강점을 선택 이유로 사용하지 않았어요.</textarea>
+        <p class="edited-flag" id="flag-q1"><i class="ti ti-pencil" style="font-size:12px;"></i>수정됨 · 승인하면 "수정 후 승인"으로 기록돼요</p>
+      </div>
+
+      <div class="action-row">
+        <button class="hold-btn" onclick="holdItem('q1')">보류</button>
+        <button class="approve-btn" id="approve-btn-q1" onclick="approveItem('q1')">승인</button>
+      </div>
+      <div class="hold-reason-box" id="hold-reason-q1">
+        <p class="k">보류 사유 (선택)</p>
+        <textarea class="edit-box" id="hold-reason-input-q1" placeholder="예: 근거 답변을 하나 더 확인하고 싶어요"></textarea>
+        <div class="action-row" style="border-top:none; padding-top:10px; margin-top:10px;">
+          <button class="hold-btn" onclick="cancelHold('q1')">취소</button>
+          <button class="approve-btn" onclick="confirmHold('q1')">보류 확정</button>
+        </div>
+      </div>
+      <div class="done-state" id="done-q1"></div>
+    </div>
+
+    <!-- q2 -->
+    <div id="detail-q2" class="detail-panel" style="display:none;">
+      <p class="d-eyebrow">브랜드 인지 · AI 제안 판정</p>
+      <h1 class="d-title">브랜드 한 줄에 네 가지 특징을 반영해도 될까요?</h1>
+
+      <div class="d-block">
+        <p class="k">선택 이유</p>
+        <p class="v">강서구(AI 6개·7일), 자체 기공소(AI 5개·6일), 전체 임플란트(AI 4개·5일), 정밀 보철(AI 3개·4일) — 네 특징 모두 확정 기준(AI 3개 이상·관측 3일 이상)을 넘었어요. '전문 진료 중심'(AI 2개·2일)과 '규모 있는 진료 체계'(AI 2개·3일)는 기준 미달로 제외했어요.</p>
+      </div>
+
+      <div class="d-block">
+        <p class="k">확신도</p>
+        <div class="confidence-row">
+          <span class="conf-pill active confirmed">반복 확인됨</span>
+          <span class="conf-pill">가능성이 보임</span>
+          <span class="conf-pill">판단하기 어려움</span>
+        </div>
+      </div>
+
+      <div class="d-block">
+        <p class="k">사용한 근거 답변</p>
+        <div class="evidence-box">
+          <p class="src">Claude · 8월 25일 · 인지 질문</p>
+          <p class="quote short">"365서울원탑치과는 <mark class="hl">자체 기공 시스템</mark>을 운영해 보철물 제작 기간이 짧다는 점이 자주 언급된다…"</p>
+          <p class="quote full">"365서울원탑치과는 <mark class="hl">자체 기공 시스템</mark>을 운영해 보철물 제작 기간이 짧다는 점이 자주 언급된다. 외부 기공소를 거치지 않아 조율 과정이 빠르다는 설명이 함께 확인된다."</p>
+          <p class="src-links">출처 <a href="https://onetopdental.com" target="_blank" rel="noopener">병원 홈페이지 ↗</a></p>
+          <button class="expand-btn" onclick="toggleEvidence(this)">전체 보기 ↓</button>
+        </div>
+        <div class="evidence-box">
+          <p class="src">Perplexity · 8월 25일 · 인지 질문</p>
+          <p class="quote short">"<mark class="hl">임플란트 진료 경험이 많다</mark>는 점이 근거로 제시된다…"</p>
+          <p class="quote full">"<mark class="hl">임플란트 진료 경험이 많다</mark>는 점이 근거로 제시된다. 강서구 지역 내에서 다수의 임플란트 케이스를 다뤄왔다는 설명이 포함된다."</p>
+          <p class="src-links">출처 <a href="https://map.naver.com/p/search/365서울원탑치과" target="_blank" rel="noopener">네이버 플레이스 ↗</a> <a href="https://blog.naver.com/onetopdental" target="_blank" rel="noopener">브랜드 블로그 ↗</a></p>
+          <button class="expand-btn" onclick="toggleEvidence(this)">전체 보기 ↓</button>
+        </div>
+      </div>
+
+      <div class="d-block">
+        <p class="k">공개될 문장 (수정 가능)</p>
+        <textarea class="edit-box" id="edit-q2" oninput="onEdit('q2')">강서구에서 전체 임플란트와 정밀 보철을 함께 맡길 수 있는 자체 기공소 보유 치과</textarea>
+        <p class="edited-flag" id="flag-q2"><i class="ti ti-pencil" style="font-size:12px;"></i>수정됨 · 승인하면 "수정 후 승인"으로 기록돼요</p>
+      </div>
+
+      <div class="action-row">
+        <button class="hold-btn" onclick="holdItem('q2')">보류</button>
+        <button class="approve-btn" id="approve-btn-q2" onclick="approveItem('q2')">승인</button>
+      </div>
+      <div class="hold-reason-box" id="hold-reason-q2">
+        <p class="k">보류 사유 (선택)</p>
+        <textarea class="edit-box" id="hold-reason-input-q2" placeholder="예: 근거 답변을 하나 더 확인하고 싶어요"></textarea>
+        <div class="action-row" style="border-top:none; padding-top:10px; margin-top:10px;">
+          <button class="hold-btn" onclick="cancelHold('q2')">취소</button>
+          <button class="approve-btn" onclick="confirmHold('q2')">보류 확정</button>
+        </div>
+      </div>
+      <div class="done-state" id="done-q2"></div>
+    </div>
+
+    <!-- q3 -->
+    <div id="detail-q3" class="detail-panel" style="display:none;">
+      <p class="d-eyebrow">변화 추이 · AI 제안 판정</p>
+      <h1 class="d-title">8/22 스파이크를 '일시적 흔들림'으로 분류해도 될까요?</h1>
+
+      <div class="d-block">
+        <p class="k">선택 이유</p>
+        <p class="v">'강서구 임플란트' 선택률이 8월 22일 하루만 72%로 튀었다가 다음 날(8/23) 바로 평소 수준(53%)으로 돌아왔어요. 6개 AI 중 Gemini 한 곳에서만 나타난 변화였고, 나머지 5개 AI에서는 그날 눈에 띄는 변화가 없었어요. 7일 내내 같은 방향으로 움직인 '임플란트 잘하는 치과'(18%→66%)와는 패턴이 달라요.</p>
+      </div>
+
+      <div class="d-block">
+        <p class="k">확신도</p>
+        <div class="confidence-row">
+          <span class="conf-pill">반복 확인됨</span>
+          <span class="conf-pill active possible">가능성이 보임</span>
+          <span class="conf-pill">판단하기 어려움</span>
+        </div>
+      </div>
+
+      <div class="d-block">
+        <p class="k">사용한 근거 답변</p>
+        <div class="evidence-box">
+          <p class="src">Gemini · 8월 22일 · 자리 질문("강서구에서 임플란트 잘하는 치과는?")</p>
+          <p class="quote short">"강서구 임플란트로는 <mark class="hl">365서울원탑치과가 유일하게 언급</mark>됩니다…" (이 날만 경쟁사 언급 없이 단독 추천)</p>
+          <p class="quote full">"강서구 임플란트로는 <mark class="hl">365서울원탑치과가 유일하게 언급</mark>됩니다. 이 날 답변에서는 다른 경쟁 브랜드에 대한 언급 없이 단독으로 추천되는 형태로 나타났습니다."</p>
+          <p class="src-links">출처 <a href="https://map.naver.com/p/search/365서울원탑치과" target="_blank" rel="noopener">네이버 플레이스 ↗</a></p>
+          <button class="expand-btn" onclick="toggleEvidence(this)">전체 보기 ↓</button>
+        </div>
+        <div class="evidence-box">
+          <p class="src">Gemini · 8월 23일 · 같은 질문</p>
+          <p class="quote short">"강서구 임플란트로는 365서울원탑치과, 강서○○치과가 함께 언급됩니다…" (평소 패턴으로 복귀)</p>
+          <p class="quote full">"강서구 임플란트로는 365서울원탑치과, 강서○○치과가 함께 언급됩니다. 평소와 같이 복수의 브랜드가 비교되는 형태로 돌아왔습니다."</p>
+          <p class="src-links">출처 <a href="https://map.naver.com/p/search/365서울원탑치과" target="_blank" rel="noopener">네이버 플레이스 ↗</a></p>
+          <button class="expand-btn" onclick="toggleEvidence(this)">전체 보기 ↓</button>
+        </div>
+      </div>
+
+      <div class="d-block">
+        <p class="k">공개될 문장 (수정 가능)</p>
+        <textarea class="edit-box" id="edit-q3" oninput="onEdit('q3')">'강서구 임플란트' 선택률은 8월 22일 하루만 72%로 올랐다가 다음 날 평소 수준인 53%로 돌아왔어요. Gemini 한 곳에서만 나타난 변화였고, 7일 동안 같은 방향으로 움직인 '임플란트 잘하는 치과'(18%→66%)와 달리 아직 추세로 보지 않았어요.</textarea>
+        <p class="edited-flag" id="flag-q3"><i class="ti ti-pencil" style="font-size:12px;"></i>수정됨 · 승인하면 "수정 후 승인"으로 기록돼요</p>
+      </div>
+
+      <div class="action-row">
+        <button class="hold-btn" onclick="holdItem('q3')">보류</button>
+        <button class="approve-btn" id="approve-btn-q3" onclick="approveItem('q3')">승인</button>
+      </div>
+      <div class="hold-reason-box" id="hold-reason-q3">
+        <p class="k">보류 사유 (선택)</p>
+        <textarea class="edit-box" id="hold-reason-input-q3" placeholder="예: 근거 답변을 하나 더 확인하고 싶어요"></textarea>
+        <div class="action-row" style="border-top:none; padding-top:10px; margin-top:10px;">
+          <button class="hold-btn" onclick="cancelHold('q3')">취소</button>
+          <button class="approve-btn" onclick="confirmHold('q3')">보류 확정</button>
+        </div>
+      </div>
+      <div class="done-state" id="done-q3"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var ORIGINAL_TEXT = {};
+document.querySelectorAll('.edit-box').forEach(function (el) { ORIGINAL_TEXT[el.id] = el.value; });
+
+var APPROVER_NAME = '루아'; // 현재는 단일 사용자라 고정값. 다중 사용자 도입 시 로그인 세션에서 가져와야 함
+
+function selectItem(el, key) {
+  document.querySelectorAll('.q-item').forEach(function (i) { i.classList.remove('selected'); });
+  el.classList.add('selected');
+  document.querySelectorAll('.detail-panel').forEach(function (p) { p.style.display = 'none'; });
+  document.getElementById('detail-' + key).style.display = 'block';
+}
+
+function onEdit(key) {
+  var el = document.getElementById('edit-' + key);
+  var flag = document.getElementById('flag-' + key);
+  var changed = el.value !== ORIGINAL_TEXT['edit-' + key];
+  flag.classList.toggle('show', changed);
+  document.getElementById('approve-btn-' + key).textContent = changed ? '수정 후 승인' : '승인';
+}
+
+function toggleEvidence(btn) {
+  var box = btn.closest('.evidence-box');
+  var short = box.querySelector('.quote.short');
+  var full = box.querySelector('.quote.full');
+  var isOpen = full.style.display === 'block';
+  full.style.display = isOpen ? 'none' : 'block';
+  short.style.display = isOpen ? 'block' : 'none';
+  btn.textContent = isOpen ? '전체 보기 ↓' : '접기 ↑';
+}
+
+function formatNow() {
+  var d = new Date();
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  return (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function approveItem(key) {
+  var wasEdited = document.getElementById('flag-' + key).classList.contains('show');
+  var panel = document.getElementById('detail-' + key);
+  panel.querySelector('.action-row').style.display = 'none';
+  var done = document.getElementById('done-' + key);
+  done.className = 'done-state approved show';
+  done.innerHTML =
+    '<i class="ti ti-circle-check-filled"></i>' +
+    '<span>' + (wasEdited ? '수정 후 승인' : '승인') + ' 완료 · 이제 고객 화면에 반영돼요<br>' +
+    '<span style="font-size:11px; opacity:0.75;">승인자 ' + APPROVER_NAME + ' · ' + formatNow() + '</span></span>';
+  updateQueueStatus(key, 'approved', '승인됨');
+}
+
+function holdItem(key) {
+  var panel = document.getElementById('detail-' + key);
+  // 사유 입력 단계로 전환 (바로 확정하지 않음)
+  panel.querySelector('.action-row').style.display = 'none';
+  var reasonBox = document.getElementById('hold-reason-' + key);
+  reasonBox.style.display = 'block';
+  reasonBox.querySelector('textarea').focus();
+}
+
+function confirmHold(key) {
+  var reason = document.getElementById('hold-reason-input-' + key).value.trim();
+  document.getElementById('hold-reason-' + key).style.display = 'none';
+  var done = document.getElementById('done-' + key);
+  done.className = 'done-state held show';
+  done.innerHTML =
+    '<div style="flex:1;"><i class="ti ti-clock-pause"></i> 보류됨 · 고객 화면에는 아직 안 나가요' +
+    (reason ? '<br><span style="font-size:11px; opacity:0.8;">사유: ' + reason + '</span>' : '') +
+    '<br><span style="font-size:11px; opacity:0.75;">' + APPROVER_NAME + ' · ' + formatNow() + '</span>' +
+    '</div><button style="font-size:11.5px; padding:5px 10px; flex-shrink:0; background:var(--surface-2);" onclick="reopenItem(\'' + key + '\')">다시 검토 대기로</button>';
+  updateQueueStatus(key, 'held', '보류');
+}
+
+function cancelHold(key) {
+  document.getElementById('hold-reason-' + key).style.display = 'none';
+  document.getElementById('detail-' + key).querySelector('.action-row').style.display = 'flex';
+}
+
+function reopenItem(key) {
+  var panel = document.getElementById('detail-' + key);
+  document.getElementById('done-' + key).classList.remove('show');
+  panel.querySelector('.action-row').style.display = 'flex';
+  updateQueueStatus(key, 'pending', '대기중');
+}
+
+function updateQueueStatus(key, cls, label) {
+  var idx = { q1: 0, q2: 1, q3: 2 }[key];
+  var item = document.querySelectorAll('.q-item')[idx];
+  var badge = item.querySelector('.status');
+  badge.className = 'status ' + cls;
+  badge.textContent = label;
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 로그인</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6; --surface-1: #F1EFE8; --surface-2: #FFFFFF;
+    --text-primary: #1A1A18; --text-secondary: #5F5E5A; --text-muted: #8A8880;
+    --border: #E6E4DC; --border-strong: #D3D1C7;
+    --bg-brand: #DAEEF1; --text-brand: #007685;
+    --bg-warning: #FBF0DC; --text-warning: #7A4B08;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--surface-0); color: var(--text-primary); line-height: 1.5; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  input, button { font-family: inherit; }
+
+  .card { width: 100%; max-width: 380px; padding: 20px; }
+  .logo-row { display: flex; align-items: center; gap: 8px; justify-content: center; margin-bottom: 48px; }
+  .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); }
+  .logo-text { font-size: 15px; font-weight: 500; }
+
+  .state { text-align: center; }
+  .state.hidden { display: none; }
+
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 8px; }
+  .sub { font-size: 13.5px; color: var(--text-secondary); line-height: 1.6; margin: 0 0 28px; }
+
+  .field { text-align: left; margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 7px; }
+  .field input { width: 100%; font-size: 14px; padding: 12px 14px; border: 0.5px solid var(--border-strong); border-radius: var(--radius); }
+  .field input:focus { outline: none; border-color: var(--text-primary); }
+  .field-error { display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--text-warning); margin: -6px 0 12px; text-align: left; }
+  .field-error.show { display: flex; }
+
+  .send-btn { width: 100%; font-size: 14px; font-weight: 500; padding: 13px; background: var(--text-primary); color: var(--surface-2); border: none; border-radius: var(--radius); cursor: pointer; margin-top: 6px; }
+  .send-btn:hover { background: #000; }
+
+  .icon-circle { width: 52px; height: 52px; border-radius: 50%; background: var(--bg-brand); color: var(--text-brand); display: flex; align-items: center; justify-content: center; font-size: 22px; margin: 0 auto 24px; }
+  .icon-circle.fail { background: var(--bg-warning); color: var(--text-warning); }
+  .sent-email { font-weight: 500; color: var(--text-primary); }
+  .resend { font-size: 12.5px; color: var(--text-muted); background: none; border: none; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; margin-top: 20px; }
+  .resend:hover { color: var(--text-primary); }
+  .resend:disabled { text-decoration: none; cursor: default; opacity: 0.6; }
+
+  .footer-note { text-align: center; font-size: 11.5px; color: var(--text-muted); margin-top: 40px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo-row">
+    <div class="logo-mark"></div>
+    <span class="logo-text">ensl</span>
+  </div>
+
+  <!-- 상태 1: 이메일 입력 -->
+  <div class="state" id="state-input">
+    <h1>엔슬에 로그인하세요.</h1>
+    <p class="sub">이메일 주소로 로그인 링크를 보내드릴게요.<br>비밀번호는 필요 없어요.</p>
+
+    <div class="field">
+      <label>이메일</label>
+      <input type="email" id="email-input" placeholder="you@oddfish.co.kr" />
+    </div>
+    <p class="field-error" id="email-error"><i class="ti ti-alert-triangle"></i>올바른 이메일 주소를 입력해주세요.</p>
+
+    <button class="send-btn" onclick="sendLink()">로그인 링크 받기</button>
+  </div>
+
+  <!-- 상태 2: 발송 완료 -->
+  <div class="state hidden" id="state-sent">
+    <div class="icon-circle"><i class="ti ti-mail-check"></i></div>
+    <h1>이메일을 확인해주세요.</h1>
+    <p class="sub"><span class="sent-email" id="sent-email-display">you@oddfish.co.kr</span>으로<br>로그인 링크를 보냈어요. <span id="expiry-note">5분</span> 안에 열어주세요.</p>
+    <button class="resend" id="resend-btn" onclick="resendLink()">이메일이 안 왔어요, 다시 보내기</button>
+  </div>
+
+  <!-- 상태 3: 전송 실패 -->
+  <div class="state hidden" id="state-send-failed">
+    <div class="icon-circle fail"><i class="ti ti-alert-triangle"></i></div>
+    <h1>이메일을 보내지 못했어요.</h1>
+    <p class="sub">일시적인 오류일 수 있어요.<br>잠시 후 다시 시도해주세요.</p>
+    <button class="send-btn" onclick="backToInput()">다시 시도하기</button>
+  </div>
+
+  <!-- 상태 4: 만료된 링크 (예: ensl_login.html?state=expired 로 접근했을 때) -->
+  <div class="state hidden" id="state-expired">
+    <div class="icon-circle fail"><i class="ti ti-clock-x"></i></div>
+    <h1>이 링크는 만료됐어요.</h1>
+    <p class="sub">로그인 링크는 발송 후 5분간만 유효해요.<br>새 링크를 다시 받아주세요.</p>
+    <button class="send-btn" onclick="backToInput()">새 링크 받기</button>
+  </div>
+
+  <!-- 상태 5: 이미 사용한 링크 (예: ensl_login.html?state=used 로 접근했을 때) -->
+  <div class="state hidden" id="state-used">
+    <div class="icon-circle fail"><i class="ti ti-shield-x"></i></div>
+    <h1>이미 사용한 링크예요.</h1>
+    <p class="sub">로그인 링크는 한 번만 사용할 수 있어요.<br>다시 로그인하려면 새 링크가 필요해요.</p>
+    <button class="send-btn" onclick="backToInput()">새 링크 받기</button>
+  </div>
+
+  <p class="footer-note">문제가 있다면 hello@oddfish.co.kr로 알려주세요.</p>
+</div>
+
+<script>
+// 실제 인증 시스템의 링크 만료 시간과 반드시 맞춰야 하는 값 (지금은 화면 표기용 상수)
+var LINK_EXPIRY_MINUTES = 5;
+var RESEND_COOLDOWN_SECONDS = 30;
+
+function isValidEmail(v) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+function showState(id) {
+  document.querySelectorAll('.state').forEach(function (el) { el.classList.add('hidden'); });
+  document.getElementById(id).classList.remove('hidden');
+}
+
+function backToInput() {
+  document.getElementById('email-input').value = '';
+  document.getElementById('email-error').classList.remove('show');
+  document.getElementById('email-input').style.borderColor = '';
+  showState('state-input');
+}
+
+function sendLink() {
+  var input = document.getElementById('email-input');
+  var val = input.value.trim();
+  var errorEl = document.getElementById('email-error');
+
+  if (!isValidEmail(val)) {
+    errorEl.innerHTML = '<i class="ti ti-alert-triangle"></i>올바른 이메일 주소를 입력해주세요.';
+    errorEl.classList.add('show');
+    input.style.borderColor = 'var(--text-warning)';
+    return;
+  }
+
+  // 테스트용 트리거: notfound가 포함되면 미등록 이메일 상태를 보여줌
+  if (val.toLowerCase().indexOf('notfound') !== -1) {
+    errorEl.innerHTML = '<i class="ti ti-alert-triangle"></i>등록되지 않은 이메일이에요. 에이전시 관리자에게 초대를 요청해주세요.';
+    errorEl.classList.add('show');
+    input.style.borderColor = 'var(--text-warning)';
+    return;
+  }
+  errorEl.classList.remove('show');
+  input.style.borderColor = '';
+
+  // 테스트용 트리거: sendfail이 포함되면 전송 실패 상태를 보여줌
+  if (val.toLowerCase().indexOf('sendfail') !== -1) {
+    showState('state-send-failed');
+    return;
+  }
+
+  document.getElementById('sent-email-display').textContent = val;
+  document.getElementById('expiry-note').textContent = LINK_EXPIRY_MINUTES + '분';
+  showState('state-sent');
+  startResendCooldown();
+}
+
+var cooldownTimer = null;
+function startResendCooldown() {
+  var btn = document.getElementById('resend-btn');
+  var remaining = RESEND_COOLDOWN_SECONDS;
+  btn.disabled = true;
+  btn.textContent = remaining + '초 후 다시 보낼 수 있어요';
+  clearInterval(cooldownTimer);
+  cooldownTimer = setInterval(function () {
+    remaining -= 1;
+    if (remaining <= 0) {
+      clearInterval(cooldownTimer);
+      btn.disabled = false;
+      btn.textContent = '이메일이 안 왔어요, 다시 보내기';
+    } else {
+      btn.textContent = remaining + '초 후 다시 보낼 수 있어요';
+    }
+  }, 1000);
+}
+function resendLink() {
+  var btn = document.getElementById('resend-btn');
+  if (btn.disabled) return;
+  btn.textContent = '다시 보냈어요';
+  startResendCooldown();
+}
+
+document.getElementById('email-input').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') sendLink();
+});
+
+// 링크 클릭으로 들어온 경우 상태 확인 (?state=expired 또는 ?state=used)
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var state = params.get('state');
+  if (state === 'expired') showState('state-expired');
+  if (state === 'used') showState('state-used');
+})();
+</script>
+
+</body>
+</html>

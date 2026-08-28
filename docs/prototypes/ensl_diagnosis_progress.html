@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>엔슬 — 진단 진행 중</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --surface-0: #FAF9F6; --surface-1: #F1EFE8; --surface-2: #FFFFFF;
+    --text-primary: #1A1A18; --text-secondary: #5F5E5A; --text-muted: #8A8880;
+    --border: #E6E4DC; --border-strong: #D3D1C7;
+    --bg-success: #EAF3DE; --text-success: #27500A;
+    --bg-warning: #FBF0DC; --text-warning: #7A4B08;
+    --brand: #00A4B8; --bg-brand: #DAEEF1; --text-brand: #007685;
+    --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--surface-0); color: var(--text-primary); line-height: 1.5; }
+  button { font-family: inherit; background: transparent; border: 0.5px solid var(--border-strong); color: var(--text-primary); cursor: pointer; border-radius: var(--radius); }
+
+  .app-shell { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { width: 220px; flex-shrink: 0; background: var(--surface-2); border-right: 0.5px solid var(--border); padding: 1rem; display: flex; flex-direction: column; gap: 4px; }
+  .logo-row { display: flex; align-items: center; gap: 8px; padding: 8px 8px 16px; }
+  .logo-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--text-primary); flex-shrink: 0; }
+  .logo-text { font-size: 14px; font-weight: 500; }
+  .brand-box { padding: 8px; margin-bottom: 12px; background: var(--surface-1); border-radius: var(--radius); }
+  .brand-box p { margin: 0; }
+  .brand-box .label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+  .brand-box .name { font-size: 13px; font-weight: 500; }
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav a { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 8px 9px; border-radius: var(--radius); color: var(--text-muted); text-decoration: none; font-size: 13px; cursor: default; }
+  nav a .left { display: flex; align-items: center; gap: 9px; }
+  nav a i.ti-lock { font-size: 12px; }
+
+  /* Top bar */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 0.5px solid var(--border); background: var(--surface-2); }
+  .topbar .status { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+  .topbar .status .livedot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); display: inline-block; animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,164,184,0.5); } 50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(0,164,184,0); } }
+  .topbar .updated { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+
+  .content { padding: 60px 40px; max-width: 720px; margin: 0 auto; text-align: center; }
+
+  .p-icon { width: 52px; height: 52px; border-radius: 16px; background: var(--bg-brand); color: var(--text-brand); display: flex; align-items: center; justify-content: center; font-size: 22px; margin: 0 auto 24px; }
+  .p-icon i { animation: spin 2.4s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  h1 { font-size: 24px; font-weight: 500; margin: 0 0 10px; }
+  .p-sub { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin: 0 0 40px; }
+
+  /* 7일 진행 트랙 */
+  .day-track { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px; }
+  .day-dot { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .day-dot .circle { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; border: 1.5px solid var(--border-strong); color: var(--text-muted); background: var(--surface-2); }
+  .day-dot.done .circle { background: var(--bg-brand); border-color: var(--bg-brand); color: var(--text-brand); }
+  .day-dot.today .circle { border-color: var(--brand); color: var(--brand); background: var(--surface-2); animation: pulse-ring 2s ease-in-out infinite; }
+  @keyframes pulse-ring { 0%,100% { box-shadow: 0 0 0 0 rgba(0,164,184,0.3); } 50% { box-shadow: 0 0 0 5px rgba(0,164,184,0); } }
+  .day-dot .lbl { font-size: 10px; color: var(--text-muted); }
+  .day-line { flex: 1; height: 1.5px; background: var(--border-strong); max-width: 28px; margin-top: -20px; }
+  .day-line.done { background: var(--bg-brand); }
+  .track-caption { font-size: 12px; color: var(--text-muted); margin: 0 0 48px; }
+  .track-caption b { color: var(--text-primary); }
+
+  /* 통계 카드 */
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 32px; }
+  .stat-card { border: 0.5px solid var(--border-strong); border-radius: 12px; padding: 18px 14px; text-align: left; }
+  .stat-card .k { font-size: 11.5px; color: var(--text-muted); margin: 0 0 8px; }
+  .stat-card .v { font-size: 22px; font-weight: 500; margin: 0; }
+  .stat-card .v .of { font-size: 13px; color: var(--text-muted); font-weight: 400; }
+
+  .min-note { display: flex; align-items: flex-start; gap: 9px; background: var(--surface-1); border-radius: var(--radius); padding: 13px 15px; text-align: left; margin-bottom: 40px; }
+  .min-note i { font-size: 14px; color: var(--text-muted); margin-top: 1px; flex-shrink: 0; }
+  .min-note p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+  .min-note strong { color: var(--text-primary); font-weight: 500; }
+
+  /* 실시간 피드 */
+  .feed-label { font-size: 12px; color: var(--text-muted); margin: 0 0 12px; text-align: left; }
+  .feed-list { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+  .feed-item { display: flex; align-items: center; gap: 10px; border: 0.5px solid var(--border); border-radius: var(--radius); padding: 11px 14px; opacity: 0; animation: feedIn 0.5s ease-out forwards; }
+  @keyframes feedIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .feed-item .eng { width: 24px; height: 24px; border-radius: 6px; background: var(--surface-1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary); }
+  .feed-item .txt { font-size: 12.5px; color: var(--text-secondary); flex: 1; }
+  .feed-item .txt b { color: var(--text-primary); font-weight: 500; }
+  .feed-item .time { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="logo-row">
+      <div class="logo-mark"></div>
+      <span class="logo-text">ensl</span>
+    </div>
+    <div class="brand-box">
+      <p class="label">진단 중인 브랜드</p>
+      <p class="name">365서울원탑치과</p>
+    </div>
+    <nav>
+      <a href="#"><span class="left"><i class="ti ti-message-2"></i>브랜드 인지</span><i class="ti ti-lock"></i></a>
+      <a href="#"><span class="left"><i class="ti ti-target-arrow"></i>브랜드 현 위치</span><i class="ti ti-lock"></i></a>
+      <a href="#"><span class="left"><i class="ti ti-git-compare"></i>인지와 위치의 간극</span><i class="ti ti-lock"></i></a>
+      <a href="#"><span class="left"><i class="ti ti-trending-up"></i>변화 추이</span><i class="ti ti-lock"></i></a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="status"><span class="livedot"></span>진단 3일차 · 7일 중</span>
+      <span class="updated"><i class="ti ti-clock"></i>18:00 기준 업데이트</span>
+    </div>
+
+    <div class="content">
+
+      <div class="p-icon"><i class="ti ti-loader-2"></i></div>
+      <h1>AI 여섯에게, 같은 질문을 묻고 있어요.</h1>
+      <p class="p-sub">6개 AI에게 인지 질문 3개·자리 질문 9개를 매일 물어보고 있어요.<br>7일이 지나면 결과를 확인할 수 있어요.</p>
+
+      <div class="day-track">
+        <div class="day-dot done"><span class="circle"><i class="ti ti-check" style="font-size:13px;"></i></span><span class="lbl">1일</span></div>
+        <div class="day-line done"></div>
+        <div class="day-dot done"><span class="circle"><i class="ti ti-check" style="font-size:13px;"></i></span><span class="lbl">2일</span></div>
+        <div class="day-line done"></div>
+        <div class="day-dot today"><span class="circle">3</span><span class="lbl">3일</span></div>
+        <div class="day-line"></div>
+        <div class="day-dot"><span class="circle">4</span><span class="lbl">4일</span></div>
+        <div class="day-line"></div>
+        <div class="day-dot"><span class="circle">5</span><span class="lbl">5일</span></div>
+        <div class="day-line"></div>
+        <div class="day-dot"><span class="circle">6</span><span class="lbl">6일</span></div>
+        <div class="day-line"></div>
+        <div class="day-dot"><span class="circle">7</span><span class="lbl">7일</span></div>
+      </div>
+      <p class="track-caption"><b>3일차</b> 진행 중 · 4일 남음 · 8월 25일 완료 예정</p>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <p class="k">인지 질문 응답</p>
+          <p class="v">38<span class="of"> / 126건</span></p>
+        </div>
+        <div class="stat-card">
+          <p class="k">자리 질문 응답</p>
+          <p class="v">104<span class="of"> / 378건</span></p>
+        </div>
+        <div class="stat-card">
+          <p class="k">응답한 AI</p>
+          <p class="v">6<span class="of"> / 6개</span></p>
+        </div>
+      </div>
+
+      <div class="min-note">
+        <i class="ti ti-info-circle"></i>
+        <p><strong>답변은 차곡차곡 모이고 있어요.</strong> 결론은 7일 관측이 모두 끝난 뒤 보여드릴게요.</p>
+      </div>
+
+      <p class="feed-label">방금 들어온 응답</p>
+      <div class="feed-list">
+        <div class="feed-item" style="animation-delay:0.05s;">
+          <span class="eng"><i class="ti ti-brand-openai" style="font-size:13px;"></i></span>
+          <span class="txt"><b>ChatGPT</b> · "강서구 전문의 협진 치과 추천해줘"에 응답</span>
+          <span class="time">방금</span>
+        </div>
+        <div class="feed-item" style="animation-delay:0.15s;">
+          <span class="eng"><i class="ti ti-sparkles" style="font-size:13px;"></i></span>
+          <span class="txt"><b>Gemini</b> · "강서구에서 임플란트 잘하는 치과는?"에 응답</span>
+          <span class="time">2분 전</span>
+        </div>
+        <div class="feed-item" style="animation-delay:0.25s;">
+          <span class="eng"><i class="ti ti-message-2" style="font-size:13px;"></i></span>
+          <span class="txt"><b>Claude</b> · "365서울원탑치과는 어떤 치과야?"에 응답</span>
+          <span class="time">6분 전</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
