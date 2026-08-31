@@ -1,5 +1,6 @@
 import { ENGINE_NAMES, EngineName } from "@/lib/engine-config";
 import { EngineCard } from "@/components/engine-card";
+import { Header } from "@/components/header";
 import {
   fetchActiveQueries,
   fetchTargetBrands,
@@ -13,9 +14,12 @@ export default async function Home() {
 
   if (brands.length === 0) {
     return (
-      <main className="p-6">
-        <p className="text-sm text-muted-foreground">등록된 브랜드가 없습니다.</p>
-      </main>
+      <>
+        <Header />
+        <main className="p-6">
+          <p className="text-sm text-muted-foreground">등록된 브랜드가 없습니다.</p>
+        </main>
+      </>
     );
   }
 
@@ -29,7 +33,9 @@ export default async function Home() {
   const periodStart = metrics[0]?.periodStart ?? null;
 
   return (
-    <main className="p-6 space-y-8">
+    <>
+      <Header />
+      <main className="p-6 space-y-8">
       {periodStart ? (
         <p className="text-sm text-muted-foreground">
           {new Date(periodStart).toLocaleDateString("ko-KR", {
@@ -64,6 +70,7 @@ export default async function Home() {
           </div>
         </section>
       ))}
-    </main>
+      </main>
+    </>
   );
 }
