@@ -85,9 +85,11 @@ export interface FullCollectionResult extends CollectedResult {
  *   하지만 쿼리 5개를 전부 한꺼번에 병렬로 부르면 총 20개 요청이 동시에 나가버려서,
  *   각 API의 rate limit(초당 요청 제한)에 걸릴 위험이 커진다.
  *   그래서 쿼리 단위로는 하나씩 순서대로 처리한다.
+ *
+ * queryTypes를 주면(Day 20) 그 타입의 쿼리만 처리한다.
  */
-export async function collectAllQueries(): Promise<FullCollectionResult[]> {
-  const queries = await fetchActiveQueries();
+export async function collectAllQueries(queryTypes?: string[]): Promise<FullCollectionResult[]> {
+  const queries = await fetchActiveQueries(queryTypes);
 
   if (queries.length === 0) {
     console.error('활성 쿼리가 없습니다. queries 테이블을 확인하세요.');
@@ -129,18 +131,21 @@ import { saveSnapshot, saveMentions } from './supabase';
 
 export async function collectAndSaveOnce(
   batchId: string,
-  runIndex: number
+  runIndex: number,
+  queryTypes?: string[]
 ): Promise<{
   batchId: string;
   totalSnapshots: number;
   savedSnapshots: number;
   savedMentions: number;
 }> {
-  console.log(`=== collectAndSaveOnce 시작 (batchId: ${batchId}, runIndex: ${runIndex}) ===`);
+  console.log(
+    `=== collectAndSaveOnce 시작 (batchId: ${batchId}, runIndex: ${runIndex}, queryTypes: ${queryTypes?.join(',') ?? '전체'}) ===`
+  );
 
 
   const knownBrands = await fetchKnownBrands();
-  const results = await collectAllQueries();
+  const results = await collectAllQueries(queryTypes);
 
   let savedSnapshots = 0;
   let savedMentions = 0;
@@ -231,19 +236,29 @@ export async function collectAndSaveOnce(
 }
 
 /**
- * A안 껍데기: 하나의 batchId로 2회 반복(run 1, run 2)을 순차 실행하고 합산한다.
+ * 하나의 batchId로 그 시간대에 필요한 반복을 전부 순차 실행하고 합산한다.
  * Day 4 설계("시간대 내 2회 반복")를 한 번의 함수 실행 안에서 구현하는 방식.
  *
- * 판단: run 1이 예상치 못한 에러로 죽어도 run 2는 시도한다(각각 try/catch로 감쌈).
- * 이유: 한쪽이 죽었다고 나머지까지 포기하면 그날 그 시간대 데이터가 통째로 0이
- * 되어버린다. 대신 어느 run이 실패했는지는 runErrors에 명시적으로 남긴다.
+ * Day 20 — 인지/자리 이원화: 인지 질문은 매 배치(09/13/18시)마다 2회 반복,
+ * 자리 질문은 09시 배치(scope='all')에서만 1회만 돈다. 검산값(162회/일)이
+ * 이 반복 횟수 차이를 전제로 나온 숫자라, 자리 질문에 2회 반복을 그대로
+ * 적용하면 안 된다 — 반드시 별도 루프로 분리해서 처리한다.
+ *
+ *   09시(all):        인지×2 + 자리×1 = (3×2 + 9×1) × 6엔진 = 90회
+ *   13시/18시(recognition): 인지×2                = (3×2)     × 6엔진 = 36회 × 2
+ *   하루 합계: 90 + 36 + 36 = 162회 (지시서 검산값과 일치)
+ *
+ * 판단: 한 반복이 예상치 못한 에러로 죽어도 나머지 반복은 시도한다(각각
+ * try/catch로 감쌈). 이유: 하나 죽었다고 나머지까지 포기하면 그날 그
+ * 시간대 데이터가 통째로 0이 되어버린다. 대신 어느 반복이 실패했는지는
+ * runErrors에 명시적으로 남긴다.
  */
-export async function collectAndSaveAll(): Promise<{
+export async function collectAndSaveAll(scope: 'all' | 'recognition' = 'recognition'): Promise<{
   batchId: string;
   totalSnapshots: number;
   savedSnapshots: number;
   savedMentions: number;
-  runErrors: string[]; // 비어있으면 둘 다 정상
+  runErrors: string[]; // 비어있으면 전부 정상
 }> {
   const batchId = randomUUID();
 
@@ -252,21 +267,31 @@ export async function collectAndSaveAll(): Promise<{
   let savedMentions = 0;
   const runErrors: string[] = [];
 
-  for (let runIndex = 1; runIndex <= 2; runIndex++) {
+  async function runOnce(label: string, runIndex: number, queryTypes: string[]) {
     try {
-      const result = await collectAndSaveOnce(batchId, runIndex);
+      const result = await collectAndSaveOnce(batchId, runIndex, queryTypes);
       totalSnapshots += result.totalSnapshots;
       savedSnapshots += result.savedSnapshots;
       savedMentions += result.savedMentions;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error(`=== run ${runIndex} 실패: ${msg} ===`);
-      runErrors.push(`run ${runIndex}: ${msg}`);
+      console.error(`=== ${label} 실패: ${msg} ===`);
+      runErrors.push(`${label}: ${msg}`);
     }
   }
 
+  // 인지 질문: 이 배치에서 항상 2회 반복 (Day4 설계 그대로)
+  for (let runIndex = 1; runIndex <= 2; runIndex++) {
+    await runOnce(`인지 run ${runIndex}`, runIndex, ['인지']);
+  }
+
+  // 자리 질문: 09시(scope='all') 배치에서만, 1회만
+  if (scope === 'all') {
+    await runOnce('자리 run 1', 1, ['자리']);
+  }
+
   console.log(
-    `=== collectAndSaveAll 완료 (batchId: ${batchId}) — snapshot ${savedSnapshots}개, mentions ${savedMentions}개, 에러 ${runErrors.length}건 ===`
+    `=== collectAndSaveAll 완료 (batchId: ${batchId}, scope: ${scope}) — snapshot ${savedSnapshots}개, mentions ${savedMentions}개, 에러 ${runErrors.length}건 ===`
   );
 
   return { batchId, totalSnapshots, savedSnapshots, savedMentions, runErrors };

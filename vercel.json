@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/collect-and-save", "schedule": "0 0 * * *" },
-    { "path": "/api/collect-and-save", "schedule": "0 4 * * *" },
-    { "path": "/api/collect-and-save", "schedule": "0 9 * * *" },
+    { "path": "/api/collect-and-save?scope=all", "schedule": "0 0 * * *" },
+    { "path": "/api/collect-and-save?scope=recognition", "schedule": "0 4 * * *" },
+    { "path": "/api/collect-and-save?scope=recognition", "schedule": "0 9 * * *" },
     { "path": "/api/aggregate-daily", "schedule": "30 15 * * *" },
     { "path": "/api/check-alerts", "schedule": "35 15 * * *" }
   ]

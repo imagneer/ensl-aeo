@@ -177,12 +177,23 @@ export interface StoredQuery {
  *
  * ⚠️ anon이 아니라 supabaseAdmin을 쓴다 — fetchKnownBrands와 같은 이유
  *    (Day 19). 이 함수도 수집/집계/알림 파이프라인이 세션 없이 호출한다.
+ *
+ * queryTypes를 주면(Day 20 — 인지/자리 이원화 수집) 그 타입만 걸러서
+ * 가져온다. 안 주면 필터 없이 전부 가져온다 — aggregator.ts·alerts.ts는
+ * 타입 구분 없이 전체를 집계/점검해야 하므로 필터를 안 넘기고 그대로
+ * 호출한다. lib/collector.ts만 이 필터를 실제로 쓴다.
  */
-export async function fetchActiveQueries(): Promise<StoredQuery[]> {
-  const { data, error } = await supabaseAdmin
+export async function fetchActiveQueries(queryTypes?: string[]): Promise<StoredQuery[]> {
+  let query = supabaseAdmin
     .from('queries')
     .select('id, query_text, intent, brand_id')
     .eq('is_active', true);
+
+  if (queryTypes && queryTypes.length > 0) {
+    query = query.in('query_type', queryTypes);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('queries 테이블 조회 실패:', error);
