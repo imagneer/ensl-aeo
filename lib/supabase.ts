@@ -1,7 +1,7 @@
 // lib/supabase.ts
 // Supabase 클라이언트 — 프로젝트 전체에서 이 파일 하나만 import해서 사용
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
@@ -82,14 +82,21 @@ export interface CurrentAccount {
  * 지금은 사용자당 워크스페이스가 항상 1개뿐이라 첫 번째 것만 반환한다 —
  * 여러 워크스페이스에 속하는 사용자가 생기면 이 함수가 선택 로직의
  * 확장 지점이 된다(작업지시서 4-3 원안 그대로).
+ *
+ * client를 안 넘기면 이 함수가 직접 세션 클라이언트를 만든다. 같은
+ * 요청 안에서 fetchTargetBrands처럼 세션 클라이언트가 또 필요한 호출이
+ * 있으면, 호출부에서 하나 만들어서 같이 넘기는 쪽이 쿠키 파싱을
+ * 중복하지 않아 더 낫다.
  */
-export async function fetchCurrentAccount(): Promise<CurrentAccount | null> {
-  const client = await createServerSupabaseClient();
+export async function fetchCurrentAccount(
+  client?: SupabaseClient
+): Promise<CurrentAccount | null> {
+  const sessionClient = client ?? (await createServerSupabaseClient());
 
-  const { data: { user } } = await client.auth.getUser();
+  const { data: { user } } = await sessionClient.auth.getUser();
   if (!user) return null;
 
-  const { data, error } = await client
+  const { data, error } = await sessionClient
     .from('account_members')
     .select('accounts(id, name)')
     .eq('user_id', user.id)
@@ -925,9 +932,17 @@ export async function updateKeywordExtractionResult(
  * 구하므로, 이 함수를 그대로 anon 키로 계속 호출한다(2026-08-31: RLS가
  * 켜지면 `/`는 브랜드가 하나도 안 보이게 되는데, 이건 알고 있는 상태로
  * 방치하기로 결정됨 — 곧 새 대시보드로 대체될 임시 화면이라 손 안 댐).
+ *
+ * ⚠️ client를 안 넘기면 anon 키를 쓴다. accountId를 넘길 거면(로그인한
+ * 화면에서 호출할 거면) createServerSupabaseClient()로 만든 세션 인식
+ * 클라이언트도 같이 넘겨야 한다 — 실측으로 확인된 함정(2026-08-31):
+ * anon 키는 로그인 여부와 무관하게 auth.uid()가 항상 null이라, RLS가
+ * "계정 소속만" 정책 하나만 남은 상태에서는 accountId로 필터링해도
+ * anon 클라이언트로는 아예 0건이 나온다(day19-step7 SQL로 예전 "누구나
+ * 읽기" 정책을 지운 뒤 (dashboard) 사이드바가 빈 화면으로 나온 원인).
  */
-export async function fetchTargetBrands(accountId?: string) {
-  let query = supabase
+export async function fetchTargetBrands(accountId?: string, client: SupabaseClient = supabase) {
+  let query = client
     .from('brands')
     .select('id, name')
     .eq('is_target', true)
