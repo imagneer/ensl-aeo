@@ -2,6 +2,8 @@
 // Supabase 클라이언트 — 프로젝트 전체에서 이 파일 하나만 import해서 사용
 
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -29,6 +31,82 @@ export const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
   },
 });
 
+/**
+ * 로그인 세션을 인식하는 요청 단위 클라이언트 (Day 19).
+ *
+ * 위 `supabase`(anon)와 다른 점: 이 클라이언트는 브라우저가 보낸 쿠키에서
+ * 로그인 세션을 읽어와서 요청을 보낸다. RLS 정책(`is_account_member` 등)이
+ * `auth.uid()`를 판단하려면 "누가 요청했는지"가 필요한데, 고정된 `supabase`
+ * 싱글턴에는 그 정보가 없다 — 항상 auth.uid()가 null로 평가돼서 로그인
+ * 여부와 무관하게 RLS에 막힌다.
+ *
+ * ⚠️ Server Component에서는 쿠키를 쓸 수 없어서(setAll이 조용히 실패)
+ *    세션 토큰 자동 갱신이 여기서는 안 먹는다 — 토큰 갱신은 proxy.ts가
+ *    모든 요청에서 먼저 처리한다. 이 함수는 Server Component/Server
+ *    Action/Route Handler 어디서 불러도 되지만, 매 요청마다 새로 만들어야
+ *    한다(다른 사용자 요청과 클라이언트를 공유하면 세션이 섞인다).
+ */
+export async function createServerSupabaseClient() {
+  const cookieStore = await cookies();
+
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          );
+        } catch {
+          // Server Component 렌더링 중에는 쿠키를 못 쓴다 — proxy.ts가 대신 처리하므로 무시해도 안전.
+        }
+      },
+    },
+  });
+}
+
+// ── 현재 로그인한 사용자의 워크스페이스(계정) 조회 (Day 19) ──
+
+export interface CurrentAccount {
+  id: string;
+  name: string;
+}
+
+/**
+ * 로그인 세션에서 현재 사용자를 확인하고, 그 사용자가 속한(status='active')
+ * 워크스페이스를 반환한다. 로그인 안 했거나 아직 어느 워크스페이스에도
+ * 속하지 않았으면(예: 방금 로그인만 하고 계정 시딩 전) null.
+ *
+ * 지금은 사용자당 워크스페이스가 항상 1개뿐이라 첫 번째 것만 반환한다 —
+ * 여러 워크스페이스에 속하는 사용자가 생기면 이 함수가 선택 로직의
+ * 확장 지점이 된다(작업지시서 4-3 원안 그대로).
+ */
+export async function fetchCurrentAccount(): Promise<CurrentAccount | null> {
+  const client = await createServerSupabaseClient();
+
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await client
+    .from('account_members')
+    .select('accounts(id, name)')
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('현재 계정 조회 실패:', error);
+    return null;
+  }
+  if (!data?.accounts) return null;
+
+  // supabase-js는 조인 결과를 배열로 줄 수도, 객체로 줄 수도 있어서 방어적으로 처리한다.
+  const account = Array.isArray(data.accounts) ? data.accounts[0] : data.accounts;
+  return account ?? null;
+}
 
 // ── DB에서 브랜드 목록 가져오기 ──
 
@@ -827,12 +905,28 @@ export async function updateKeywordExtractionResult(
 
   return true;
 }
-export async function fetchTargetBrands() {
-  const { data, error } = await supabase
+/**
+ * is_target=true인 브랜드 목록을 이름순으로 가져온다.
+ *
+ * accountId를 주면(Day 19 — 로그인한 워크스페이스 기준) 그 워크스페이스
+ * 소속 브랜드만 필터링한다. 안 주면 필터 없이 예전 그대로 동작한다 —
+ * `/`(기존 데모 홈페이지)는 로그인을 안 하는 페이지라 accountId를 못
+ * 구하므로, 이 함수를 그대로 anon 키로 계속 호출한다(2026-08-31: RLS가
+ * 켜지면 `/`는 브랜드가 하나도 안 보이게 되는데, 이건 알고 있는 상태로
+ * 방치하기로 결정됨 — 곧 새 대시보드로 대체될 임시 화면이라 손 안 댐).
+ */
+export async function fetchTargetBrands(accountId?: string) {
+  let query = supabase
     .from('brands')
     .select('id, name')
     .eq('is_target', true)
     .order('name');
+
+  if (accountId) {
+    query = query.eq('account_id', accountId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('fetchTargetBrands error:', error);

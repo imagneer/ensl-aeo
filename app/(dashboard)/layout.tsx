@@ -1,13 +1,17 @@
 import { Suspense } from 'react';
 import { Sidebar } from '@/components/Sidebar';
-import { fetchTargetBrands } from '@/lib/supabase';
+import { fetchCurrentAccount, fetchTargetBrands } from '@/lib/supabase';
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const brands = await fetchTargetBrands();
+  // proxy.ts가 로그인 안 한 요청은 이미 /login으로 돌려보내지만, 로그인은
+  // 했는데 아직 어느 워크스페이스에도 안 속한 상태(계정 시딩 전)일 수
+  // 있어서 account가 null일 수 있다 — 이때는 그냥 빈 브랜드 목록으로 둔다.
+  const account = await fetchCurrentAccount();
+  const brands = account ? await fetchTargetBrands(account.id) : [];
 
   return (
     <div className="app-shell">
