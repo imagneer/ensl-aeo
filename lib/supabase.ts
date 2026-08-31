@@ -119,9 +119,17 @@ import type { KnownBrand } from './parser';
  * 왜 async(비동기)인가:
  *   DB 조회는 네트워크를 타야 하니까 시간이 걸린다.
  *   "주문하고 기다렸다가 받는" 구조라서 await를 써야 한다.
+ *
+ * ⚠️ anon이 아니라 supabaseAdmin을 쓴다 (Day 19, 계정 격리 RLS 도입 후 수정).
+ *    이 함수는 lib/collector.ts·aggregator.ts·alerts.ts가 cron으로 도는
+ *    수집/집계/알림 파이프라인 전체에서 쓴다 — 로그인한 사용자 세션이
+ *    아니라 서버가 혼자 도는 배치 작업이라 anon 키로는 auth.uid()가 항상
+ *    null이다. RLS가 계정 소속만 허용하도록 걸리면(day19-step7 SQL 이후)
+ *    anon으로는 브랜드를 하나도 못 읽어와서 브랜드 매칭 자체가 멈춘다.
+ *    fetchSnapshotsForAggregation과 같은 이유(Day 17 결정)로 admin을 쓴다.
  */
 export async function fetchKnownBrands(): Promise<KnownBrand[]> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('brands')
     .select('id, name, aliases, is_target, domain');
 
@@ -159,9 +167,12 @@ export interface StoredQuery {
 /**
  * Supabase queries 테이블에서 활성화된(is_active=true) 쿼리 목록을 읽어온다.
  * 하드코딩된 testQuery 문자열을 대체하는 함수.
+ *
+ * ⚠️ anon이 아니라 supabaseAdmin을 쓴다 — fetchKnownBrands와 같은 이유
+ *    (Day 19). 이 함수도 수집/집계/알림 파이프라인이 세션 없이 호출한다.
  */
 export async function fetchActiveQueries(): Promise<StoredQuery[]> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('queries')
     .select('id, query_text, intent, brand_id')
     .eq('is_active', true);
