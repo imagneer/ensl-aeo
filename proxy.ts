@@ -48,6 +48,43 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // ⚠️ ?brand= 없이 대시보드 경로로 들어온 경우(가장 흔한 예: 로그인 직후
+  // /auth/callback의 기본 next="/brand-awareness"가 brand 파라미터를 안
+  // 붙임) 첫 번째 타겟 브랜드로 리다이렉트한다. 4개 화면 전부를 한 곳에서
+  // 처리하려고 했는데, layout.tsx는 searchParams를 못 받는 구조라서
+  // (Next.js 공식 문서: "Layouts... cannot access search params") 이미
+  // 이 4개 경로를 전부 보호하고 있는 proxy.ts로 옮겨서 구현함(2026-09-01,
+  // 루아 요청).
+  if (isProtected && user && !request.nextUrl.searchParams.has('brand')) {
+    const { data: member } = await supabase
+      .from('account_members')
+      .select('account_id')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+
+    if (member?.account_id) {
+      const { data: brand } = await supabase
+        .from('brands')
+        .select('id')
+        .eq('account_id', member.account_id)
+        .eq('is_target', true)
+        .order('name')
+        .limit(1)
+        .maybeSingle();
+
+      if (brand?.id) {
+        const redirectUrl = new URL(request.nextUrl.pathname, request.url);
+        redirectUrl.search = request.nextUrl.searchParams.toString();
+        redirectUrl.searchParams.set('brand', brand.id);
+        return NextResponse.redirect(redirectUrl);
+      }
+    }
+    // 계정/브랜드를 못 찾으면(시딩 전 등) 그냥 통과 — 각 페이지가 이미
+    // "브랜드를 선택해주세요" 같은 빈 상태를 처리하고 있다.
+  }
+
   return response;
 }
 
