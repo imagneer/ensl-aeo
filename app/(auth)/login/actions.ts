@@ -36,16 +36,34 @@ export async function sendMagicLink(formData: FormData) {
     console.error('매직링크 발송 실패:', error.status, error.code, error.message);
 
     // ⚠️ 실패 사유를 뭉뚱그리지 않는다(2026-09-01). 예전엔 전부 "잠시 후 다시
-    // 시도해주세요"로 덮었는데, 실제 원인이 발송 한도 초과(429
-    // over_email_send_rate_limit)일 때는 다시 시도하는 게 오히려 한도를
-    // 더 소진시켜서 상황을 악화시킨다. 사용자가 "몇 번 더 눌러보면 되겠지"로
-    // 오해하게 만드는 문구였고, 실제로 13초 안에 4번 재시도한 기록이 남았다.
-    // 원인별로 다르게 안내하고, 개발자가 나중에 추적할 수 있게 에러 코드도
-    // 함께 남긴다(CLAUDE.md "실패를 조용히 삼키지 않는다").
+    // 시도해주세요"로 덮었는데, 그러면 사용자가 "몇 번 더 눌러보면 되겠지"로
+    // 오해해서 오히려 한도를 더 태운다(실제로 13초 안에 4번 재시도한 기록이
+    // 남았다).
+    //
+    // ⚠️⚠️ 더 중요한 함정(같은 날 실측으로 확인): Supabase는 성격이 완전히
+    // 다른 두 상황에 **똑같은 error_code(over_email_send_rate_limit)와
+    // 똑같은 429**를 쓴다.
+    //   (a) 사용자당 최소 간격 — 대기 시간 60초 (SMTP 설정의 Minimum
+    //       interval per user). msg 예: "For security purposes, you can only
+    //       request this after 51 seconds"
+    //   (b) 시간당 총 발송량 한도 — 대기 시간 1시간 단위.
+    //       msg 예: "email rate limit exceeded"
+    // 코드만 보고 하나로 뭉뚱그리면 60초만 기다리면 될 사람에게 "1시간
+    // 기다리라"고 잘못 안내하게 된다(실제로 그렇게 안내해서 루아를 헛되이
+    // 기다리게 만들었다). 그래서 대기 시간은 추측하지 않고 Supabase가 준
+    // 메시지에서 실제 초를 뽑아 쓴다.
     const isRateLimited = error.status === 429 || error.code === 'over_email_send_rate_limit';
-    const message = isRateLimited
-      ? '메일 발송 한도에 걸렸어요. 지금은 다시 눌러도 발송되지 않으니 1시간쯤 뒤에 시도해주세요.'
-      : `로그인 링크를 보내지 못했어요. (오류: ${error.code ?? error.status ?? '알 수 없음'})`;
+    const waitSeconds = error.message?.match(/after (\d+) seconds?/i)?.[1];
+
+    let message: string;
+    if (waitSeconds) {
+      message = `연속 요청을 막기 위해 ${waitSeconds}초 후에 다시 보낼 수 있어요. 잠깐 기다렸다 다시 눌러주세요.`;
+    } else if (isRateLimited) {
+      message =
+        '메일 발송 한도에 걸렸어요. 지금은 다시 눌러도 발송되지 않으니 1시간쯤 뒤에 시도해주세요.';
+    } else {
+      message = `로그인 링크를 보내지 못했어요. (오류: ${error.code ?? error.status ?? '알 수 없음'})`;
+    }
 
     redirect('/login?error=' + encodeURIComponent(message));
   }
