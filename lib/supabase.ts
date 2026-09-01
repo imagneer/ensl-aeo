@@ -169,6 +169,14 @@ export interface StoredQuery {
    * 이전까지는 이 필드가 필요한 소비처(집계)가 없어서 select에서 빠져 있었다.
    */
   brandId: string;
+
+  /**
+   * '인지' | '자리' | null (Day 20 이전에 만들어진 뒤 확정 12개 세트에
+   * 안 들어가서 비활성화된 옛 쿼리는 null).
+   * (2026-09-01, 브랜드 한 줄 로직 추가) — aggregator.ts가 "이 쿼리가
+   * 인지 질문인가"를 판단해서 표현 추출을 붙일지 결정하는 데 쓴다.
+   */
+  queryType: string | null;
 }
 
 /**
@@ -186,7 +194,7 @@ export interface StoredQuery {
 export async function fetchActiveQueries(queryTypes?: string[]): Promise<StoredQuery[]> {
   let query = supabaseAdmin
     .from('queries')
-    .select('id, query_text, intent, brand_id')
+    .select('id, query_text, intent, brand_id, query_type')
     .eq('is_active', true);
 
   if (queryTypes && queryTypes.length > 0) {
@@ -207,6 +215,7 @@ export async function fetchActiveQueries(queryTypes?: string[]): Promise<StoredQ
     queryText: row.query_text,
     intent: row.intent,
     brandId: row.brand_id,
+    queryType: row.query_type,
   }));
 }
 // ── 수집 결과를 DB에 저장하기 ──
@@ -1025,4 +1034,304 @@ export async function fetchLatestDashboardMetrics(brandId: string): Promise<Dash
     hasSource: row.has_source,       // ← 추가
     hasCitation: row.has_citation,   // ← 추가
   }));
+}
+
+// ══════════════════════════════════════════════════════════
+// 브랜드 한 줄 생성 로직 (2026-09-01, 작업지시서_브랜드한줄로직_v1.1.md)
+// ══════════════════════════════════════════════════════════
+
+// ── 진단 회차 (diagnoses) ──
+
+export interface StoredDiagnosis {
+  id: string;
+  brandId: string;
+  startedAt: string; // 'YYYY-MM-DD'
+  endedAt: string | null;
+  status: 'collecting' | 'completed';
+}
+
+/** 이 브랜드의 진행 중인(collecting) 진단 회차를 가져온다. 없으면 null. */
+export async function fetchOpenDiagnosis(brandId: string): Promise<StoredDiagnosis | null> {
+  const { data, error } = await supabaseAdmin
+    .from('diagnoses')
+    .select('id, brand_id, started_at, ended_at, status')
+    .eq('brand_id', brandId)
+    .eq('status', 'collecting')
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('진행 중인 진단 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    brandId: data.brand_id,
+    startedAt: data.started_at,
+    endedAt: data.ended_at,
+    status: data.status,
+  };
+}
+
+/**
+ * status='collecting'인 진단 중, dateKST 기준으로 시작일 포함 minDays일이
+ * 이미 다 채워진 것들을 찾는다. 매일 밤 집계 크론이 그날(dateKST) 집계를
+ * 끝낸 직후 이 함수로 "오늘 종료 처리할 진단이 있는지"를 확인한다
+ * (2026-09-01 확정 — 별도 트리거 없이 야간 크론에 편입).
+ *
+ * ⚠️ dateKST는 실행 시각의 "오늘"이 아니라 aggregateAllQueriesForDay가
+ * 방금 집계한 날짜다(보통 어제 — yesterdayKST()). started_at이 9/1이고
+ * minDays=7이면, 9/1~9/7 7일치가 다 채워진 시점인 dateKST=9/7에 만료로
+ * 잡혀야 한다 — startedAt + (minDays-1)일을 커트라인으로 계산한다
+ * (minDays를 그대로 빼면 하루 늦게(9/8) 잡히는 버그가 됨, 실제로 걸림).
+ */
+export async function fetchExpiredDiagnoses(
+  dateKST: string,
+  minDays = 7
+): Promise<StoredDiagnosis[]> {
+  // ⚠️ 'Z'(UTC)로 파싱해야 한다. '+09:00'로 만들면 이 Date의 UTC 캘린더
+  // 날짜가 하루 전으로 밀려서(KST 자정 = UTC 전날 15시), 뒤이은
+  // setUTCDate/getUTCDate 계산이 하루씩 어긋난다 — 실제로 이 버그로
+  // 만료 판정이 하루 늦게(9/7이 아니라 9/8에) 걸리는 걸 확인하고 고쳤다
+  // (2026-09-01). 여기서는 실제 타임존 변환이 필요 없고 "달력 날짜"끼리의
+  // 순수한 덧뺄셈만 하면 되므로, 처음부터 UTC로 취급하는 게 맞다.
+  const cutoff = new Date(`${dateKST}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - (minDays - 1));
+  const cutoffDate = cutoff.toISOString().slice(0, 10);
+
+  const { data, error } = await supabaseAdmin
+    .from('diagnoses')
+    .select('id, brand_id, started_at, ended_at, status')
+    .eq('status', 'collecting')
+    .lte('started_at', cutoffDate);
+
+  if (error) {
+    console.error('만료된 진단 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    brandId: row.brand_id,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    status: row.status,
+  }));
+}
+
+/** 진단을 종료 처리한다 (collecting → completed). */
+export async function completeDiagnosis(diagnosisId: string, endedAt: string): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('diagnoses')
+    .update({ status: 'completed', ended_at: endedAt })
+    .eq('id', diagnosisId);
+
+  if (error) {
+    console.error('진단 종료 처리 실패:', error);
+    return false;
+  }
+  return true;
+}
+
+// ── 브랜드 사실 정보 ──
+
+/** brands.brand_facts를 읽어온다. 없으면 null(충돌판정은 건너뛴다는 신호). */
+export async function fetchBrandFacts(brandId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('brands')
+    .select('brand_facts')
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('brand_facts 조회 실패:', error);
+    return null;
+  }
+  return data?.brand_facts ?? null;
+}
+
+// ── 추출된 개별 표현 (brand_expressions) ──
+
+export interface BrandExpressionToSave {
+  snapshotId: string;
+  queryId: string;
+  brandId: string;
+  engine: string;
+  observedDate: string; // 'YYYY-MM-DD', KST 기준
+  expression: string;
+  sourceSentence: string;
+  sentiment: '긍정' | '중립' | '부정' | null;
+  isInduced: boolean;
+  conflictsWithBrandFacts: boolean;
+}
+
+export async function saveBrandExpressions(expressions: BrandExpressionToSave[]): Promise<boolean> {
+  if (expressions.length === 0) return true;
+
+  const { error } = await supabaseAdmin.from('brand_expressions').insert(
+    expressions.map((e) => ({
+      snapshot_id: e.snapshotId,
+      query_id: e.queryId,
+      brand_id: e.brandId,
+      engine: e.engine,
+      observed_date: e.observedDate,
+      expression: e.expression,
+      source_sentence: e.sourceSentence,
+      sentiment: e.sentiment,
+      is_induced: e.isInduced,
+      conflicts_with_brand_facts: e.conflictsWithBrandFacts,
+    }))
+  );
+
+  if (error) {
+    console.error('brand_expressions 저장 실패:', error);
+    return false;
+  }
+  return true;
+}
+
+export interface StoredBrandExpression {
+  id: string;
+  snapshotId: string;
+  queryId: string;
+  brandId: string;
+  engine: string;
+  observedDate: string;
+  expression: string;
+  sourceSentence: string;
+  sentiment: '긍정' | '중립' | '부정' | null;
+  isInduced: boolean;
+  conflictsWithBrandFacts: boolean;
+}
+
+/** 진단 기간(관측일 기준, 양끝 포함) 동안 쌓인 brand_expressions 전부를 가져온다. */
+export async function fetchBrandExpressionsForBrand(
+  brandId: string,
+  periodStartDate: string,
+  periodEndDate: string
+): Promise<StoredBrandExpression[]> {
+  const { data, error } = await supabaseAdmin
+    .from('brand_expressions')
+    .select(
+      'id, snapshot_id, query_id, brand_id, engine, observed_date, expression, source_sentence, sentiment, is_induced, conflicts_with_brand_facts'
+    )
+    .eq('brand_id', brandId)
+    .gte('observed_date', periodStartDate)
+    .lte('observed_date', periodEndDate);
+
+  if (error) {
+    console.error('brand_expressions 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    snapshotId: row.snapshot_id,
+    queryId: row.query_id,
+    brandId: row.brand_id,
+    engine: row.engine,
+    observedDate: row.observed_date,
+    expression: row.expression,
+    sourceSentence: row.source_sentence,
+    sentiment: row.sentiment,
+    isInduced: row.is_induced,
+    conflictsWithBrandFacts: row.conflicts_with_brand_facts,
+  }));
+}
+
+/**
+ * 주어진 쿼리들에 대해, 기간 안에 유효 응답(status='success')을 1번이라도
+ * 낸 적 있는 엔진 목록을 돌려준다. v1.1 ④ — 강도 계산(AI 범위)의 분모.
+ * ⚠️ 최소기준 필터(5번, "AI 3개 이상")에는 안 쓴다 — 그건 절대값 고정으로
+ * 확정됨(2026-09-01, 9/7~8 첫 진단 종료 후 재검토 예정).
+ */
+export async function fetchValidEnginesForQueriesInPeriod(
+  queryIds: string[],
+  periodStartUtc: string,
+  periodEndUtc: string
+): Promise<string[]> {
+  if (queryIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('snapshots')
+    .select('engine')
+    .in('query_id', queryIds)
+    .eq('status', 'success')
+    .gte('executed_at', periodStartUtc)
+    .lt('executed_at', periodEndUtc);
+
+  if (error) {
+    console.error('유효 엔진 목록 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return Array.from(new Set(data.map((row) => row.engine)));
+}
+
+// ── 생성된 브랜드 한 줄 (brand_one_liners) ──
+
+export interface SelectedFeatureToSave {
+  feature: string;
+  coverage: { questions: number; engines: number; days: number };
+  evidence: string[]; // brand_expressions.id 목록
+}
+
+/**
+ * 자동검수 재시도 과정을 남기는 디버깅용 로그(2026-09-01, 루아 제안).
+ * 화면엔 안 보여주고 "왜 이 한 줄은 근거가 약하지?"를 나중에 추적하는 용도.
+ * jsonb인 이유: 검수 로직이 정교해지면(예: 제외 사유까지) 컬럼 스키마
+ * 안 바꾸고 필드만 늘릴 수 있게.
+ */
+export interface GenerationLog {
+  originalFeatureCount: number;
+  retryCount: number;
+  excludedByReview: string[]; // 검수에서 걸려서 빠진 특징 label 목록
+}
+
+export interface BrandOneLinerToSave {
+  diagnosisId: string;
+  brandId: string;
+  status: '반복확인' | '초기한줄' | '근거부족' | '잘못된인지';
+  oneLiner: string | null; // 근거부족이면 null
+  selectedFeatures: SelectedFeatureToSave[] | null;
+  questionIds: string[];
+  engineList: string[];
+  generationLog?: GenerationLog | null;
+}
+
+export async function saveBrandOneLiner(input: BrandOneLinerToSave): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('brand_one_liners')
+    .insert({
+      diagnosis_id: input.diagnosisId,
+      brand_id: input.brandId,
+      status: input.status,
+      one_liner: input.oneLiner,
+      selected_features: input.selectedFeatures,
+      question_ids: input.questionIds,
+      engine_list: input.engineList,
+      logic_version: 'v1.1',
+      reviewed_by_human: false, // MVP: 루아가 Supabase 대시보드에서 직접 true로 변경
+      generation_log: input.generationLog
+        ? {
+            original_feature_count: input.generationLog.originalFeatureCount,
+            retry_count: input.generationLog.retryCount,
+            excluded_by_review: input.generationLog.excludedByReview,
+          }
+        : null,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('brand_one_liners 저장 실패:', error);
+    return null;
+  }
+  return data.id;
 }

@@ -63,9 +63,12 @@ import {
   fetchFailedKeywordExtractionRows,
   saveAggregatedMetric,
   updateKeywordExtractionResult,
+  fetchBrandFacts,
+  saveBrandExpressions,
   type SnapshotForAggregation,
   type MentionForAggregation,
   type AggregatedMetricToSave,
+  type BrandExpressionToSave,
 } from './supabase';
 
 import { parseBrandMentions, type KnownBrand } from './parser';
@@ -75,6 +78,11 @@ import {
   countTopKeywords,
   type TopKeyword,
 } from './keyword-extractor';
+import {
+  extractBrandExpressionsDetailed,
+  isInducedExpression,
+  dedupeExpressionsWithinSnapshot,
+} from './brand-expression-extractor';
 import { retryWithBackoff, isRetryableLLMError } from './retry';
 
 import { ENGINE_NAMES, type EngineName } from './engine-config';
@@ -159,6 +167,16 @@ export interface AggregateOneParams {
   /** daily 레벨(또는 batchId 없이 기간으로 모을 때) 사용 */
   periodStart?: string;
   periodEnd?: string;
+
+  // ── 브랜드 한 줄 로직 4-1(표현 추출)용 — 인지 질문일 때만 채워서 넘긴다 ──
+  /** queries.query_type. '인지'가 아니면 표현 추출을 안 한다. */
+  queryType?: string | null;
+  /** 유도 판정(is_induced)에 필요한 실제 질문 문장 */
+  queryText?: string;
+  /** 이 진단 기간의 KST 날짜('YYYY-MM-DD') — brand_expressions.observed_date로 저장 */
+  observedDateKST?: string;
+  /** brands.brand_facts. 호출부(aggregateAllQueriesForDay)가 브랜드당 한 번만 조회해서 넘긴다 */
+  brandFacts?: string | null;
 }
 
 interface KeywordExtractionResult {
@@ -226,6 +244,91 @@ async function attemptKeywordExtraction(params: {
       error
     );
     return { topKeywords: null, status: 'failed' };
+  }
+}
+
+/**
+ * (쿼리, 엔진, 기간) 조합 하나에서 브랜드 한 줄용 표현을 추출해서 바로
+ * brand_expressions에 저장한다(원안 2번, 4-1단계). attemptKeywordExtraction과
+ * 문단 준비 과정은 동일하고, LLM 호출과 저장 스펙만 다르다.
+ *
+ * ⚠️ 실패해도(429든 파싱 실패든) 이 함수는 조용히 로그만 남기고 넘어간다 —
+ * aggregated_metrics의 키워드 추출처럼 별도 재시도 큐(status 컬럼)는 이번
+ * 범위에 없다. 다음날 밤 크론이 그날 새로 쌓인 스냅샷을 또 훑을 때, 어제
+ * 실패한 (쿼리,엔진,기간) 조합은 자연스럽게 재시도되지 않는다는 뜻 —
+ * 알려진 한계로 남겨둔다.
+ */
+async function attemptBrandExpressionExtraction(params: {
+  queryId: string;
+  queryText: string;
+  engine: string;
+  periodStart: string;
+  periodEnd: string;
+  observedDateKST: string;
+  targetBrandId: string;
+  targetBrandName: string;
+  knownBrands: KnownBrand[];
+  brandFacts: string | null;
+}): Promise<void> {
+  try {
+    const rawSnapshots = await fetchSnapshotsForKeywordExtraction({
+      queryId: params.queryId,
+      engine: params.engine,
+      periodStart: params.periodStart,
+      periodEnd: params.periodEnd,
+    });
+
+    const snapshotsForParagraphs = rawSnapshots
+      .map((s) => {
+        const parsed = parseBrandMentions(s.rawResponse, params.knownBrands);
+        if (!parsed.targetMention) return null;
+        return {
+          snapshotId: s.id,
+          rawText: s.rawResponse,
+          targetBrandName: params.targetBrandName,
+          allMentions: parsed.mentions.map((m) => ({
+            brandName: m.brandName,
+            position: m.position,
+          })),
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+
+    const paragraphs = buildBrandParagraphs(snapshotsForParagraphs);
+    if (paragraphs.length === 0) return;
+
+    const results = await retryWithBackoff(
+      () => extractBrandExpressionsDetailed(params.targetBrandName, paragraphs, params.brandFacts),
+      3,
+      isRetryableLLMError
+    );
+
+    const toSave: BrandExpressionToSave[] = [];
+
+    for (const r of results) {
+      const deduped = dedupeExpressionsWithinSnapshot(r.items);
+      for (const item of deduped) {
+        toSave.push({
+          snapshotId: r.snapshotId,
+          queryId: params.queryId,
+          brandId: params.targetBrandId,
+          engine: params.engine,
+          observedDate: params.observedDateKST,
+          expression: item.expression,
+          sourceSentence: item.sourceSentence,
+          sentiment: item.sentiment,
+          isInduced: isInducedExpression(item.expression, params.queryText),
+          conflictsWithBrandFacts: item.conflictsWithBrandFacts,
+        });
+      }
+    }
+
+    await saveBrandExpressions(toSave);
+  } catch (error) {
+    console.error(
+      `브랜드 표현 추출 실패 (query=${params.queryId}, engine=${params.engine}, date=${params.observedDateKST}):`,
+      error
+    );
   }
 }
 
@@ -345,6 +448,22 @@ export async function aggregateOne(
       });
       topKeywords = kwResult.topKeywords;
       keywordExtractionStatus = kwResult.status;
+
+      // 브랜드 한 줄 로직 4-1 — 인지 질문 응답에서만 표현을 추출한다.
+      if (params.queryType === '인지' && params.queryText && params.observedDateKST) {
+        await attemptBrandExpressionExtraction({
+          queryId: params.queryId,
+          queryText: params.queryText,
+          engine: params.engine,
+          periodStart,
+          periodEnd,
+          observedDateKST: params.observedDateKST,
+          targetBrandId: params.targetBrandId,
+          targetBrandName: targetBrand.name,
+          knownBrands: allKnownBrands,
+          brandFacts: params.brandFacts ?? null,
+        });
+      }
     }
   }
 
@@ -485,10 +604,22 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
   
   };
 
+  // brand_facts는 브랜드당 값이 하나뿐이라(쿼리마다 안 바뀜) 이 함수 실행
+  // 동안 한 번만 조회하고 재사용한다 — 브랜드 한 줄 4-1(표현 추출)용.
+  const brandFactsCache = new Map<string, string | null>();
+  async function getBrandFacts(brandId: string): Promise<string | null> {
+    if (!brandFactsCache.has(brandId)) {
+      brandFactsCache.set(brandId, await fetchBrandFacts(brandId));
+    }
+    return brandFactsCache.get(brandId)!;
+  }
+
   for (const query of queries) {
     const otherBrands = knownBrands
       .filter((b) => b.brandId !== query.brandId)
       .map((b) => ({ brandId: b.brandId, name: b.name }));
+
+    const brandFacts = query.queryType === '인지' ? await getBrandFacts(query.brandId) : null;
 
     for (const engine of ENGINE_NAMES) {
       summary.attempted++;
@@ -501,6 +632,10 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
           aggregationLevel: 'daily',
           periodStart,
           periodEnd,
+          queryType: query.queryType,
+          queryText: query.queryText,
+          observedDateKST: dateKST,
+          brandFacts,
         },
         otherBrands,
         knownBrands   // ← 추가

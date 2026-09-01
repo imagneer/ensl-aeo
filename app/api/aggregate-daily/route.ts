@@ -2,9 +2,10 @@
 
 import { NextResponse } from 'next/server';
 import { aggregateAllQueriesForDay, yesterdayKST } from '@/lib/aggregator';
+import { checkAndCompleteDiagnoses } from '@/lib/brand-one-liner';
 import { isAuthorizedCronRequest } from '@/lib/cron-auth';
 
-export const maxDuration = 300; // 기존 60 → 키워드 추출(LLM 호출) 추가 예정이라 여유 확보
+export const maxDuration = 800; // 브랜드 한 줄 합성(LLM 여러 번) 추가로 300 → 800(Fluid Compute 상한)
 
 /**
  * 특정 KST 날짜의 daily 집계를 수동으로 돌려보는 테스트 라우트.
@@ -30,9 +31,15 @@ export async function GET(request: Request) {
 
     console.log('=== daily 집계 완료 ===', summary);
 
+    // 브랜드 한 줄 — 그날 집계가 끝난 뒤, 오늘 종료할 진단이 있는지 확인
+    console.log('=== 진단 종료 확인 시작 ===');
+    const diagnosisSummary = await checkAndCompleteDiagnoses(dateKST);
+    console.log('=== 진단 종료 확인 완료 ===', diagnosisSummary);
+
     return NextResponse.json({
       success: true,
       ...summary,
+      diagnosisCompletion: diagnosisSummary,
     });
   } catch (error) {
     console.error('daily 집계 실패:', error);

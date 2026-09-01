@@ -21,3 +21,10 @@
 export const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
 export const ANTHROPIC_VERSION = '2023-06-01';
+
+/**
+ * 브랜드 한 줄 합성(묶기·문장작성·자동검수, 2026-09-01)용 모델.
+ * 최종 사용자가 보는 문장을 만드는 단계라, 단순 표현 추출(Haiku)보다
+ * 더 강한 모델을 쓰기로 루아와 확인함.
+ */
+export const ANTHROPIC_MODEL_SONNET = 'claude-sonnet-5';
