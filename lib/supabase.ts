@@ -72,6 +72,8 @@ export async function createServerSupabaseClient() {
 export interface CurrentAccount {
   id: string;
   name: string;
+  /** account_members.role — owner/admin/editor/viewer (Day 20, 브랜드 한 줄 role 게이팅용) */
+  role: 'owner' | 'admin' | 'editor' | 'viewer';
 }
 
 /**
@@ -98,7 +100,7 @@ export async function fetchCurrentAccount(
 
   const { data, error } = await sessionClient
     .from('account_members')
-    .select('accounts(id, name)')
+    .select('role, accounts(id, name)')
     .eq('user_id', user.id)
     .eq('status', 'active')
     .limit(1)
@@ -112,7 +114,9 @@ export async function fetchCurrentAccount(
 
   // supabase-js는 조인 결과를 배열로 줄 수도, 객체로 줄 수도 있어서 방어적으로 처리한다.
   const account = Array.isArray(data.accounts) ? data.accounts[0] : data.accounts;
-  return account ?? null;
+  if (!account) return null;
+
+  return { id: account.id, name: account.name, role: data.role };
 }
 
 // ── DB에서 브랜드 목록 가져오기 ──
@@ -1294,11 +1298,21 @@ export interface GenerationLog {
   excludedByReview: string[]; // 검수에서 걸려서 빠진 특징 label 목록
 }
 
+/**
+ * ⚠️ oneLiner는 반드시 status와 같이 봐야 한다(2026-09-01, 루아 지적).
+ * DB 컬럼에도 같은 내용의 COMMENT ON COLUMN을 걸어뒀다
+ * (docs/day-brandoneliner-column-comment.sql).
+ *   - '반복확인': 완성된 브랜드 한 줄 — 화면에 확정형으로 인용해도 됨
+ *   - '초기한줄': lib/brand-one-liner.ts가 원안 9번 문구를 코드로 조합한
+ *     것 — 완성된 "브랜드 한 줄"이 아니다. 확정형처럼 인용하지 말 것
+ *     (Day22/23에서 이 필드를 다시 쓸 때 특히 주의)
+ *   - '근거부족'·'잘못된인지'는 각각 null / 별도 정의된 경고 문구
+ */
 export interface BrandOneLinerToSave {
   diagnosisId: string;
   brandId: string;
   status: '반복확인' | '초기한줄' | '근거부족' | '잘못된인지';
-  oneLiner: string | null; // 근거부족이면 null
+  oneLiner: string | null; // 근거부족이면 null — 위 주석 참고
   selectedFeatures: SelectedFeatureToSave[] | null;
   questionIds: string[];
   engineList: string[];
@@ -1334,4 +1348,251 @@ export async function saveBrandOneLiner(input: BrandOneLinerToSave): Promise<str
     return null;
   }
   return data.id;
+}
+
+// ── 화면용 조회: 브랜드 한 줄 최신 상태 (Day 20, 브랜드 인지 화면) ──
+
+/** diagnoses.id로 특정 진단 회차 하나를 가져온다. */
+export async function fetchDiagnosisById(
+  diagnosisId: string,
+  client: SupabaseClient
+): Promise<StoredDiagnosis | null> {
+  const { data, error } = await client
+    .from('diagnoses')
+    .select('id, brand_id, started_at, ended_at, status')
+    .eq('id', diagnosisId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('진단 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    brandId: data.brand_id,
+    startedAt: data.started_at,
+    endedAt: data.ended_at,
+    status: data.status,
+  };
+}
+
+/** 이 브랜드의 가장 최근 진단 회차(상태 무관)를 가져온다. */
+export async function fetchLatestDiagnosis(
+  brandId: string,
+  client: SupabaseClient
+): Promise<StoredDiagnosis | null> {
+  const { data, error } = await client
+    .from('diagnoses')
+    .select('id, brand_id, started_at, ended_at, status')
+    .eq('brand_id', brandId)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('최신 진단 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    brandId: data.brand_id,
+    startedAt: data.started_at,
+    endedAt: data.ended_at,
+    status: data.status,
+  };
+}
+
+/**
+ * 오늘(KST) 기준으로 진단이 시작된 지 며칠째인지. 시작일을 1일째로 센다.
+ * ⚠️ fetchExpiredDiagnoses에서 잡았던 것과 같은 종류의 timezone 함정을
+ * 피하려고, 여기서도 전부 'Z'(UTC 취급)로 파싱한다 — '+09:00'로 만든
+ * Date에 UTC 메서드를 섞어 쓰면 날짜가 하루 밀린다.
+ */
+function daysElapsedSince(startedAt: string): number {
+  const start = new Date(`${startedAt}T00:00:00Z`);
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const nowKstDateStr = nowKst.toISOString().slice(0, 10);
+  const now = new Date(`${nowKstDateStr}T00:00:00Z`);
+  const diffDays = Math.round((now.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+  return Math.max(diffDays + 1, 1);
+}
+
+interface StoredBrandOneLinerRow {
+  id: string;
+  diagnosisId: string;
+  status: '반복확인' | '초기한줄' | '근거부족' | '잘못된인지';
+  oneLiner: string | null;
+  selectedFeatures: SelectedFeatureToSave[] | null;
+  questionIds: string[];
+  engineList: string[];
+  reviewedByHuman: boolean;
+}
+
+export interface BrandOneLinerConflict {
+  oneLiner: string;
+  selectedFeatures: SelectedFeatureToSave[] | null;
+}
+
+export type BrandOneLinerMain =
+  | { state: '진단중'; daysElapsed: number | null }
+  | {
+      state: '완료';
+      diagnosis: { id: string; startedAt: string; endedAt: string | null };
+      status: '반복확인' | '초기한줄' | '근거부족';
+      /** ⚠️ status와 같이 봐야 함 — '초기한줄'일 때는 확정된 브랜드 한 줄이
+       *  아니다(BrandOneLinerToSave 위 주석 참고). 그대로 표시는 해도 되지만
+       *  "완성된 한 줄"인 것처럼 다른 곳에 재인용하지 말 것. */
+      oneLiner: string | null;
+      selectedFeatures: SelectedFeatureToSave[] | null;
+      /** owner/admin에게만 의미 있는 플래그 — editor/viewer는 이 값이 false인
+       *  콘텐츠 자체를 절대 못 받으므로(항상 '진단중'으로 폴백), 여기까지
+       *  왔다는 건 owner/admin이거나 이미 검토된 콘텐츠라는 뜻. */
+      reviewed: boolean;
+      questionIds: string[];
+      engineList: string[];
+    };
+
+export interface BrandOneLinerView {
+  main: BrandOneLinerMain;
+  /** "잘못된 인지" — 본문(main)과 별개 채널. main이 '진단중'으로 가려진
+   *  상태에서도, 이 conflicting 자체가 검토·role 조건을 통과했으면 노출될
+   *  수 있다(작업지시서: "위 상태와 별개로... 노출 조건은 본문과 동일 적용"
+   *  — "본문과 동일한 규칙을 독립적으로 적용"으로 해석함). */
+  conflicting: BrandOneLinerConflict | null;
+}
+
+/**
+ * 브랜드 인지 화면(Day 20)이 쓰는 단일 진입점.
+ *
+ * viewerRole이 'editor'|'viewer'면 reviewed_by_human=false인 콘텐츠는
+ * 존재 자체를 숨긴다(그런 콘텐츠가 있다는 사실도 안 알려준다 — "검토
+ * 대기 배지"조차 안 보여주고 그냥 '진단중'과 구분 안 되게 만든다).
+ * owner/admin은 검토 여부와 무관하게 항상 다 보고, reviewed 플래그로
+ * "아직 검토 전"임을 알 수 있다.
+ *
+ * diagnosisId를 주면 "최신 진단"이 아니라 그 특정 진단을 조회한다 —
+ * Day23(변화 추이)에서 과거 회차를 순회할 때 이 함수를 그대로 재사용하기
+ * 위한 확장 지점(작업지시서 3-1 설계 원칙).
+ */
+export async function fetchLatestBrandOneLiner(
+  brandId: string,
+  viewerRole: string,
+  client: SupabaseClient,
+  diagnosisId?: string
+): Promise<BrandOneLinerView> {
+  const diagnosis = diagnosisId
+    ? await fetchDiagnosisById(diagnosisId, client)
+    : await fetchLatestDiagnosis(brandId, client);
+
+  if (!diagnosis || diagnosis.status === 'collecting') {
+    return {
+      main: { state: '진단중', daysElapsed: diagnosis ? daysElapsedSince(diagnosis.startedAt) : null },
+      conflicting: null,
+    };
+  }
+
+  const { data, error } = await client
+    .from('brand_one_liners')
+    .select(
+      'id, diagnosis_id, status, one_liner, selected_features, question_ids, engine_list, reviewed_by_human'
+    )
+    .eq('diagnosis_id', diagnosis.id);
+
+  if (error) {
+    console.error('brand_one_liners 조회 실패:', error);
+    return { main: { state: '진단중', daysElapsed: daysElapsedSince(diagnosis.startedAt) }, conflicting: null };
+  }
+
+  const rows: StoredBrandOneLinerRow[] = (data ?? []).map((row) => ({
+    id: row.id,
+    diagnosisId: row.diagnosis_id,
+    status: row.status,
+    oneLiner: row.one_liner,
+    selectedFeatures: row.selected_features,
+    questionIds: row.question_ids,
+    engineList: row.engine_list,
+    reviewedByHuman: row.reviewed_by_human,
+  }));
+
+  const isRestrictedRole = viewerRole === 'editor' || viewerRole === 'viewer';
+
+  const mainRow = rows.find((r) => r.status !== '잘못된인지') ?? null;
+  const conflictRow = rows.find((r) => r.status === '잘못된인지') ?? null;
+
+  let main: BrandOneLinerMain;
+  if (!mainRow) {
+    // completed인데 brand_one_liners 행 자체가 없음 — 합성 실패 상황 대비 방어적 처리
+    main = { state: '진단중', daysElapsed: daysElapsedSince(diagnosis.startedAt) };
+  } else if (isRestrictedRole && !mainRow.reviewedByHuman) {
+    main = { state: '진단중', daysElapsed: daysElapsedSince(diagnosis.startedAt) };
+  } else {
+    main = {
+      state: '완료',
+      diagnosis: { id: diagnosis.id, startedAt: diagnosis.startedAt, endedAt: diagnosis.endedAt },
+      status: mainRow.status as '반복확인' | '초기한줄' | '근거부족',
+      oneLiner: mainRow.oneLiner,
+      selectedFeatures: mainRow.selectedFeatures,
+      reviewed: mainRow.reviewedByHuman,
+      questionIds: mainRow.questionIds,
+      engineList: mainRow.engineList,
+    };
+  }
+
+  const conflicting: BrandOneLinerConflict | null =
+    conflictRow && conflictRow.oneLiner && (!isRestrictedRole || conflictRow.reviewedByHuman)
+      ? { oneLiner: conflictRow.oneLiner, selectedFeatures: conflictRow.selectedFeatures }
+      : null;
+
+  return { main, conflicting };
+}
+
+// ── 특징 카드를 펼쳤을 때 보여줄 실제 근거 (Day 20) ──
+
+export interface EvidenceItem {
+  id: string;
+  queryId: string;
+  queryText: string;
+  engine: string;
+  observedDate: string;
+  sourceSentence: string;
+}
+
+/**
+ * selected_features[].evidence(brand_expressions.id 배열)로 실제 근거
+ * 행을 가져온다. 질문 원문(query_text)까지 같이 보여주려고 queries를
+ * 조인한다 — brand_expressions엔 query_id만 있어서 그것만으론 화면에
+ * "어떤 질문에서 나온 근거인지" 문장으로 못 보여준다.
+ */
+export async function fetchBrandExpressionsByIds(
+  ids: string[],
+  client: SupabaseClient
+): Promise<EvidenceItem[]> {
+  if (ids.length === 0) return [];
+
+  const { data, error } = await client
+    .from('brand_expressions')
+    .select('id, query_id, engine, observed_date, source_sentence, queries(query_text)')
+    .in('id', ids);
+
+  if (error) {
+    console.error('근거(brand_expressions) 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => {
+    const queryRel = Array.isArray(row.queries) ? row.queries[0] : row.queries;
+    return {
+      id: row.id,
+      queryId: row.query_id,
+      queryText: queryRel?.query_text ?? '(질문 원문을 찾을 수 없음)',
+      engine: row.engine,
+      observedDate: row.observed_date,
+      sourceSentence: row.source_sentence,
+    };
+  });
 }

@@ -339,3 +339,73 @@ mark.comp { background: var(--mark-comp); padding: 1px 3px; border-radius: 3px; 
 .auth-card button[type="submit"]:hover { opacity: 0.92; }
 .auth-card .error { font-size: 12.5px; color: var(--text-warning); margin: 0; }
 .auth-card .sent .email { font-weight: 500; color: var(--text-primary); }
+
+/* ── 브랜드 인지 화면 — Day 20 ──
+   디자인 원본: docs/prototypes/ensl_brand_awareness.html (반복확인 상태만
+   있음 — 나머지 4개 상태·검토대기 배지·잘못된 인지 박스는 이번에 새로
+   설계, 매니페스토 1·4번 원칙 기준). 클래스명은 원본을 최대한 그대로
+   따라가되, 전부 .app-shell 스코프 안에서만 쓰므로 별도 접두사 없이도
+   기존 화면(공용 헤더/카드 등)과 안 부딪힌다. */
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; gap: 16px; flex-wrap: wrap; }
+.eyebrow { font-size: 12px; color: var(--text-muted); letter-spacing: 0.02em; margin: 0 0 4px; }
+.page-title { font-size: 22px; font-weight: 500; margin: 0; }
+.meta-row { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 28px; }
+.meta-row span { display: flex; align-items: center; gap: 5px; }
+
+.headline-card { background: var(--surface-1); border-radius: 12px; padding: 2rem; margin-bottom: 24px; position: relative; }
+.headline-card .quote-icon { font-size: 26px; color: var(--text-success); position: absolute; top: 20px; left: 20px; }
+.headline-card .sub-label { font-size: 13px; color: var(--text-secondary); margin: 0 0 10px; padding-left: 12px; }
+.headline-sentence { font-size: 25px; font-weight: 500; line-height: 1.5; margin: 0 0 18px; padding-left: 12px; }
+.badge-row { display: flex; align-items: center; gap: 8px; padding-left: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+
+.conf-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; padding: 7px 16px; border-radius: 20px; }
+.conf-badge.confirmed { background: var(--bg-success); color: var(--text-success); }
+.conf-badge.possible { background: var(--bg-warning); color: var(--text-warning); }
+.conf-badge.unclear { background: var(--surface-2); color: var(--text-muted); border: 0.5px solid var(--border-strong); }
+.conf-badge.pending { background: var(--surface-2); color: var(--text-muted); border: 0.5px dashed var(--border-strong); }
+.app-shell .evidence-btn { font-size: 13px; padding: 7px 16px; }
+
+.evidence-panel { margin: 20px 12px 4px; padding-top: 20px; border-top: 0.5px solid var(--border); }
+.evidence-panel[hidden] { display: none; }
+.evidence-panel .panel-title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+.criteria-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 10px; }
+.criteria-cell { border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 12px; text-align: center; }
+.criteria-cell .k { font-size: 11px; color: var(--text-muted); margin: 0 0 4px; }
+.criteria-cell .v { font-size: 18px; font-weight: 500; margin: 0 0 2px; }
+.criteria-cell .t { font-size: 11px; color: var(--text-secondary); margin: 0; }
+.app-shell .note { font-size: 12px; color: var(--text-muted); margin: 0; }
+
+/* 특징 목록 */
+h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary); margin: 0 0 4px; }
+.app-shell .section-sub { font-size: 12px; color: var(--text-muted); margin: 0 0 14px; }
+
+.full-list { display: flex; flex-direction: column; }
+.list-row { border-top: 0.5px solid var(--border); }
+.list-row:last-child { border-bottom: 0.5px solid var(--border); }
+.row-main { display: flex; align-items: flex-start; justify-content: space-between; padding: 13px 4px; gap: 16px; }
+.row-left { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.row-title { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.row-name { font-size: 13.5px; font-weight: 500; }
+.row-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+.row-stat { font-size: 11px; color: var(--text-muted); margin: 0; }
+.rep-tag { font-size: 11px; padding: 2px 8px; border-radius: var(--radius); white-space: nowrap; }
+.rep-tag.in-headline { color: var(--text-success); background: var(--bg-success); }
+.row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 1px; }
+.row-toggle { width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; }
+.row-panel { padding: 0 4px 12px; }
+.row-panel[hidden] { display: none; }
+.row-panel .evidence-box { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface-2); }
+.row-panel .evidence-box + .evidence-box { margin-top: 8px; }
+.row-panel .src { font-size: 12px; color: var(--text-muted); margin: 0 0 6px; }
+.row-panel .quote { font-size: 13px; color: var(--text-secondary); line-height: 1.65; margin: 0; }
+
+/* 잘못된 인지 박스 */
+.conflict-box { border: 0.5px solid var(--bg-warning); background: #FEFBF3; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; }
+.conflict-box .cb-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--text-warning); margin: 0 0 8px; }
+.conflict-box .cb-sentence { font-size: 15px; line-height: 1.6; margin: 0; color: var(--text-primary); }
+
+/* 빈 상태(진단중 · 근거부족) */
+.empty-state { border: 0.5px solid var(--border); border-radius: 12px; padding: 40px 32px; text-align: center; background: var(--surface-2); }
+.empty-state .es-icon { font-size: 28px; color: var(--text-muted); margin-bottom: 12px; }
+.empty-state .es-text { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+.empty-state .es-sub { font-size: 12.5px; color: var(--text-muted); margin: 8px 0 0; }

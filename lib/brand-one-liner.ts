@@ -487,7 +487,8 @@ export interface SynthesisResult {
   savedOneLinerIds: string[];
 }
 
-function diagnosisDurationDays(diagnosis: StoredDiagnosis, endedAt: string): number {
+/** 화면(브랜드 인지, Day 20)도 같은 "전체 진단일 수" 계산이 필요해서 export한다. */
+export function diagnosisDurationDays(diagnosis: StoredDiagnosis, endedAt: string): number {
   const start = new Date(`${diagnosis.startedAt}T00:00:00Z`);
   const end = new Date(`${endedAt}T00:00:00Z`);
   const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
@@ -569,12 +570,22 @@ export async function synthesizeBrandOneLiner(
     if (id) savedOneLinerIds.push(id);
   } else {
     // 문장작성 → 자동검수(별도 호출) → 위반 특징 있으면 빼고 재시도(최대 2회)
+    //
+    // ⚠️ LLM 문장작성(원안 8번 "선정된 특징 2~3개만 사용해 한 문장으로
+    // 조합")은 특징이 2개 이상일 때만 부른다. 특징이 1개면(처음부터
+    // 1개였거나 재시도 중 줄었거나) LLM을 아예 안 부르고, 원안 9번이
+    // "초기한줄"용으로 정의해둔 문구를 코드에서 템플릿으로 직접 조합한다
+    // (2026-09-01, 루아 지적으로 수정) — "초기한줄" 문장은 확신 있는
+    // "브랜드 한 줄"이 아니라는 게 원안의 핵심이라, LLM이 매번 다르게
+    // 표현하게 두지 않고 고정 문구로 못박는다. one_liner는 항상 status와
+    // 같이 저장되고, 화면은 값을 그대로 표시하기만 하면 되므로(판단은
+    // 데이터 레이어에서 끝남) 화면 쪽에 별도 재조립 로직이 없어도 된다.
     const originalFeatureCount = selected.length;
     const excludedByReview: string[] = [];
     let retryCount = 0;
     let oneLiner: string | null = null;
 
-    for (let attempt = 0; attempt < 2 && selected.length > 0; attempt++) {
+    for (let attempt = 0; attempt < 2 && selected.length >= 2; attempt++) {
       const draft = await writeOneLiner(brandName, selected);
       const review = await reviewOneLiner(brandName, draft, selected);
 
@@ -591,8 +602,17 @@ export async function synthesizeBrandOneLiner(
       selected = selected.filter((f) => !review.violatedFeatureLabels.includes(f.label));
     }
 
-    const status: BrandOneLinerToSave['status'] =
-      oneLiner && selected.length >= 2 ? '반복확인' : oneLiner && selected.length === 1 ? '초기한줄' : '근거부족';
+    let status: BrandOneLinerToSave['status'];
+    if (oneLiner && selected.length >= 2) {
+      status = '반복확인';
+    } else if (selected.length === 1) {
+      status = '초기한줄';
+      // 원안 9번 문구 그대로 — LLM 없이 결정적으로 조합(재현 가능).
+      oneLiner = `현재 AI는 ${brandName}를 '${selected[0].label}'와 가장 강하게 연결하고 있습니다. 아직 다른 특징은 반복 확인 중입니다.`;
+    } else {
+      status = '근거부족';
+      oneLiner = null;
+    }
 
     const selectedFeaturesToSave: SelectedFeatureToSave[] | null =
       status === '근거부족'
@@ -607,7 +627,7 @@ export async function synthesizeBrandOneLiner(
       diagnosisId: diagnosis.id,
       brandId: diagnosis.brandId,
       status,
-      oneLiner: status === '근거부족' ? null : oneLiner,
+      oneLiner,
       selectedFeatures: selectedFeaturesToSave,
       questionIds,
       engineList,
