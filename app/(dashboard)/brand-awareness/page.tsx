@@ -3,6 +3,7 @@ import {
   fetchCurrentAccount,
   fetchTargetBrands,
   fetchLatestBrandOneLiner,
+  fetchLatestDiagnosis,
   fetchBrandExpressionsByIds,
   fetchBrandFeatureCandidatesForDiagnosis,
   fetchBrandFeatureConflictsForDiagnosis,
@@ -14,7 +15,7 @@ import {
   type QuestionEvidenceSummary,
 } from '@/lib/supabase';
 import { diagnosisDurationDays } from '@/lib/brand-one-liner';
-import { kstDayBoundsUtc } from '@/lib/aggregator';
+import { kstDayBoundsUtc, todayKST } from '@/lib/aggregator';
 import { BrandOneLinerView } from '@/components/BrandOneLinerView';
 import {
   AIConsensusSection,
@@ -49,10 +50,14 @@ export default async function BrandAwarenessPage({
     return <div className="empty-state"><p className="es-text">계정 정보를 확인할 수 없습니다. 다시 로그인해주세요.</p></div>;
   }
 
-  const [view, brands, recognitionQuestions] = await Promise.all([
+  const [view, brands, recognitionQuestions, diagnosis] = await Promise.all([
     fetchLatestBrandOneLiner(brandId, account.role, sessionClient),
     fetchTargetBrands(account.id, sessionClient),
     fetchActiveQueries(['인지']),
+    // 4번 섹션(질문별 근거)은 brand_one_liners 합성(진단 종료 시 1회) 없이도
+    // snapshots를 바로 집계해서 보여줄 수 있다 — 그래서 view.main.state와
+    // 독립적으로 diagnosis를 따로 조회한다(Day21 렌더링 구조 수정, 루아 확인).
+    fetchLatestDiagnosis(brandId, sessionClient),
   ]);
 
   const brandName = brands.find((b) => b.id === brandId)?.name ?? '이 브랜드';
@@ -142,14 +147,25 @@ export default async function BrandAwarenessPage({
 
   // 4번 섹션 "무엇을 근거로 판단했을까?"(Day21) — 새 판단 로직 없이
   // snapshots를 진단 기간(KST) 기준으로 그대로 집계만 한다.
-  const questionEvidenceSummaries: QuestionEvidenceSummary[] =
-    view.main.state === '완료'
-      ? await fetchQuestionEvidenceSummary(
-          recognitionQuestions.map((q) => q.id),
-          kstDayBoundsUtc(view.main.diagnosis.startedAt).periodStart,
-          kstDayBoundsUtc(view.main.diagnosis.endedAt ?? view.main.diagnosis.startedAt).periodEnd
-        )
-      : [];
+  //
+  // ⚠️ 1~3번 섹션(brand_one_liners/brand_feature_candidates/conflicts)은
+  // 전부 진단 종료 시 1회 도는 4-2 합성 결과물이라 view.main.state==='완료'
+  // 이전엔 정말로 보여줄 데이터가 없다(게이팅이 정당함). 반면 4번은
+  // snapshots를 그때그때 바로 집계할 수 있어서 합성을 기다릴 필요가 없다
+  // — 그래서 view가 아니라 위에서 독립적으로 조회한 diagnosis를 기준으로
+  // 삼는다(2026-09-02, 렌더링 구조 수정 — 원래 view.main.state 게이팅에
+  // 같이 딸려가서 진단 중엔 4번까지 통째로 안 보이던 버그였음).
+  const sectionFourPeriodEndDate = diagnosis?.endedAt ?? todayKST();
+  const sectionFourTotalDays = diagnosis
+    ? diagnosisDurationDays(diagnosis, sectionFourPeriodEndDate)
+    : 0;
+  const questionEvidenceSummaries: QuestionEvidenceSummary[] = diagnosis
+    ? await fetchQuestionEvidenceSummary(
+        recognitionQuestions.map((q) => q.id),
+        kstDayBoundsUtc(diagnosis.startedAt).periodStart,
+        kstDayBoundsUtc(sectionFourPeriodEndDate).periodEnd
+      )
+    : [];
   const evidenceSummaryByQueryId = new Map(questionEvidenceSummaries.map((s) => [s.queryId, s]));
   const questionEvidenceRows: QuestionEvidenceRow[] = recognitionQuestions.map((q) => {
     const summary = evidenceSummaryByQueryId.get(q.id);
@@ -157,7 +173,7 @@ export default async function BrandAwarenessPage({
       queryId: q.id,
       queryText: q.queryText,
       respondedDays: summary?.respondedDays ?? 0,
-      totalDays,
+      totalDays: sectionFourTotalDays,
       respondedEngineLabels: (summary?.respondedEngines ?? []).map(engineLabel),
       representative: summary?.representative
         ? {
@@ -185,16 +201,15 @@ export default async function BrandAwarenessPage({
         evidenceFor={evidenceFor}
       />
       {view.main.state === '완료' && (
-        <>
-          <AIConsensusSection
-            allEngineItems={allEngineItems}
-            someEngineItems={someEngineItems}
-            totalEngines={totalEngines}
-            conflicts={resolvedConflicts}
-          />
-          <QuestionEvidenceSection rows={questionEvidenceRows} brandId={brandId} />
-        </>
+        <AIConsensusSection
+          allEngineItems={allEngineItems}
+          someEngineItems={someEngineItems}
+          totalEngines={totalEngines}
+          conflicts={resolvedConflicts}
+        />
       )}
+      {/* 진단 상태와 무관하게 항상 렌더링 — 위 주석 참고. */}
+      <QuestionEvidenceSection rows={questionEvidenceRows} brandId={brandId} />
     </>
   );
 }
