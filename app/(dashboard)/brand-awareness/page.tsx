@@ -4,6 +4,7 @@ import {
   fetchTargetBrands,
   fetchLatestBrandOneLiner,
   fetchLatestDiagnosis,
+  fetchDiagnosesForBrand,
   fetchBrandExpressionsByIds,
   fetchBrandFeatureCandidatesForDiagnosis,
   fetchBrandFeatureConflictsForDiagnosis,
@@ -13,6 +14,7 @@ import {
   type EvidenceItem,
   type StoredBrandFeatureCandidate,
   type QuestionEvidenceSummary,
+  type TipContentData,
 } from '@/lib/supabase';
 import { diagnosisDurationDays } from '@/lib/brand-one-liner';
 import { kstDayBoundsUtc, todayKST } from '@/lib/aggregator';
@@ -26,7 +28,20 @@ import {
   QuestionEvidenceSection,
   type QuestionEvidenceRow,
 } from '@/components/QuestionEvidenceSection';
+import { TipBox } from '@/components/TipBox';
 import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
+
+/** "1차 진단 · 8월 19일–25일" (Day21) — 같은 달이면 종료일에 월을 안 붙인다. */
+function formatRoundLabel(roundNumber: number, startedAt: string, endDateKST: string): string {
+  const start = new Date(`${startedAt}T00:00:00Z`);
+  const end = new Date(`${endDateKST}T00:00:00Z`);
+  const startLabel = `${start.getUTCMonth() + 1}월 ${start.getUTCDate()}일`;
+  const endLabel =
+    start.getUTCMonth() === end.getUTCMonth()
+      ? `${end.getUTCDate()}일`
+      : `${end.getUTCMonth() + 1}월 ${end.getUTCDate()}일`;
+  return `${roundNumber}차 진단 · ${startLabel}–${endLabel}`;
+}
 
 function engineLabel(engine: string): string {
   return ENGINE_CONFIG[engine as EngineName]?.label ?? engine;
@@ -50,7 +65,7 @@ export default async function BrandAwarenessPage({
     return <div className="empty-state"><p className="es-text">계정 정보를 확인할 수 없습니다. 다시 로그인해주세요.</p></div>;
   }
 
-  const [view, brands, recognitionQuestions, diagnosis] = await Promise.all([
+  const [view, brands, recognitionQuestions, diagnosis, diagnosesForBrand] = await Promise.all([
     fetchLatestBrandOneLiner(brandId, account.role, sessionClient),
     fetchTargetBrands(account.id, sessionClient),
     fetchActiveQueries(['인지']),
@@ -58,10 +73,21 @@ export default async function BrandAwarenessPage({
     // snapshots를 바로 집계해서 보여줄 수 있다 — 그래서 view.main.state와
     // 독립적으로 diagnosis를 따로 조회한다(Day21 렌더링 구조 수정, 루아 확인).
     fetchLatestDiagnosis(brandId, sessionClient),
+    // 회차 표시("1차 진단 · ...", Day21) — diagnoses에 회차 번호 컬럼이
+    // 없어서 시작일 오름차순 목록 전체를 받아 순서로 매긴다.
+    fetchDiagnosesForBrand(brandId, sessionClient),
   ]);
 
   const brandName = brands.find((b) => b.id === brandId)?.name ?? '이 브랜드';
   const totalQuestions = recognitionQuestions.length;
+
+  const roundLabel = diagnosis
+    ? formatRoundLabel(
+        diagnosesForBrand.length,
+        diagnosis.startedAt,
+        diagnosis.endedAt ?? todayKST()
+      )
+    : null;
 
   // 전체 특징 후보(brand_feature_candidates, v1.2) — 헤드라인에 실제로 쓰인
   // 3개뿐 아니라 tier가 낮아 아직 확정 안 된 것까지 화면에 다 보여준다.
@@ -189,15 +215,22 @@ export default async function BrandAwarenessPage({
     };
   });
 
+  // 팁 박스(Day21) — 항상 노출(작업지시서 3-1). 완료 상태가 아니면(진단중
+  // 등) tipContent 자체가 없으니 TipBox가 알아서 일반 팁 풀로 대체한다.
+  const tipContent: TipContentData | null =
+    view.main.state === '완료' ? view.main.tipContent : null;
+
   return (
     <>
       <BrandOneLinerView
         brandName={brandName}
+        brandId={brandId}
         view={view}
         candidates={candidates}
         totalQuestions={totalQuestions}
         totalDays={totalDays}
         totalEngines={totalEngines}
+        roundLabel={roundLabel}
         evidenceFor={evidenceFor}
       />
       {view.main.state === '완료' && (
@@ -210,6 +243,7 @@ export default async function BrandAwarenessPage({
       )}
       {/* 진단 상태와 무관하게 항상 렌더링 — 위 주석 참고. */}
       <QuestionEvidenceSection rows={questionEvidenceRows} brandId={brandId} />
+      <TipBox tipContent={tipContent} />
     </>
   );
 }

@@ -66,14 +66,18 @@ function EmptyState({ icon, text, sub }: { icon: string; text: string; sub?: str
  */
 export function BrandOneLinerView({
   brandName,
+  brandId,
   view,
   candidates,
   totalQuestions,
   totalDays,
   totalEngines,
+  roundLabel,
   evidenceFor,
 }: {
   brandName: string;
+  /** 완료 CTA의 "브랜드 현 위치 보러가기" 링크에 붙일 ?brand= 값(Day21). */
+  brandId: string;
   view: BrandOneLinerViewData;
   /** brand_feature_candidates 전체 목록(v1.2) — '잘못된인지'가 가리키는
    *  후보는 호출부(page.tsx)가 이미 걸러서 준다. */
@@ -81,6 +85,9 @@ export function BrandOneLinerView({
   totalQuestions: number;
   totalDays: number;
   totalEngines: number;
+  /** "1차 진단 · 8월 19일–25일" (Day21) — 회차가 없으면(진단중이라 아직
+   *  diagnoses가 없는 경우 등) null. */
+  roundLabel: string | null;
   evidenceFor: (ids: string[]) => EvidenceItem[];
 }) {
   const sortedCandidates = [...candidates].sort(
@@ -98,6 +105,13 @@ export function BrandOneLinerView({
           <p className="eyebrow">브랜드 한 줄</p>
           <h1 className="page-title">AI는 {brandName}를 어떻게 인지하고 있나</h1>
         </div>
+        {roundLabel && (
+          <span className="date-picker">
+            <i className="ti ti-calendar" />
+            {roundLabel}
+            <i className="ti ti-chevron-down" />
+          </span>
+        )}
       </div>
 
       {totalQuestions > 0 && (
@@ -223,6 +237,22 @@ export function BrandOneLinerView({
             })}
           </div>
         </>
+      )}
+
+      {/* 완료 CTA(Day21) — '반복확인'일 때만. 초기한줄/근거부족/잘못된인지
+          상태에서는 아직 확정 안 된 결과를 갖고 "다음 단계로" 유도하면
+          안 된다(작업지시서 명시). */}
+      {view.main.state === '완료' && view.main.status === '반복확인' && (
+        <div className="done-cta">
+          <p className="done-title">
+            AI의 기억 속 {brandName}를 확인했어요.
+            <br />
+            이제, 어떤 자리 질문에서 등장하는지 볼 차례예요.
+          </p>
+          <a className="done-btn" href={`/brand-position?brand=${brandId}`}>
+            브랜드 현 위치 보러가기 <span className="done-arrow">→</span>
+          </a>
+        </div>
       )}
     </>
   );

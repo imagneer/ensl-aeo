@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { Sidebar } from '@/components/Sidebar';
+import { DashboardTopbar } from '@/components/DashboardTopbar';
 import { createServerSupabaseClient, fetchCurrentAccount, fetchTargetBrands } from '@/lib/supabase';
 
 export default async function DashboardLayout({
@@ -29,9 +30,11 @@ export default async function DashboardLayout({
       </Suspense>
       <div className="main">
         <div className="topbar">
-          {/* 진단 일차·업데이트 시각은 Day20 이후 실데이터 연동 시 채운다 */}
-          <span className="status" />
-          <span className="updated" />
+          {/* DashboardTopbar도 useSearchParams를 쓰는 클라이언트 컴포넌트라
+              Suspense로 감싼다(Day21) — Sidebar와 같은 이유. */}
+          <Suspense fallback={<span className="status" />}>
+            <DashboardTopbar />
+          </Suspense>
         </div>
         <div className="content">{children}</div>
       </div>

@@ -412,6 +412,26 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .empty-state .es-text { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
 .empty-state .es-sub { font-size: 12.5px; color: var(--text-muted); margin: 8px 0 0; }
 
+/* 완료 CTA (Day21) — 브랜드 한 줄이 '반복확인' 상태일 때만 하단에 노출 */
+.done-cta { margin-top: 32px; padding-top: 32px; border-top: 0.5px solid var(--border-strong); }
+.done-title { font-size: 19px; font-weight: 500; line-height: 1.55; margin: 0 0 20px; }
+.done-btn { font-size: 13.5px; font-weight: 500; padding: 11px 20px; background: var(--text-primary); color: var(--surface-2); border: none; border-radius: var(--radius); display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+.done-btn:hover { background: #000; }
+.done-arrow { transition: transform 0.2s ease; display: inline-block; }
+.done-btn:hover .done-arrow { transform: translateX(3px); }
+
+/* 팁 박스(Day21) — 모든 화면 하단 공통 컴포넌트. "AI의 기억 다루는 법"
+   링크(.tip-btn)는 목적지 콘텐츠 페이지가 아직 없어서 이번 범위에서 뺐다. */
+.tip-box { margin: 52px 0 0; border: 0.5px solid var(--border-strong); border-radius: 12px; background: transparent; padding: 24px 26px; }
+.tip-badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-muted); border: 0.5px solid var(--border-strong); border-radius: 4px; padding: 2px 7px; margin: 0 0 14px; }
+.tip-title { font-size: 19px; font-weight: 500; color: var(--text-primary); margin: 0 0 8px; line-height: 1.45; }
+.tip-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0; }
+
+/* 회차 표시(Day21) — 페이지 헤더 우측, 아직 회차가 1개뿐이라 드롭다운
+   없이 텍스트만(2회차 생기면 그때 실제 드롭다운으로 확장). 클릭해도
+   아무 일도 안 나서 <button>이 아니라 <span>으로 렌더링한다. */
+.date-picker { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 7px 12px; border: 0.5px solid var(--border-strong); border-radius: var(--radius); color: var(--text-secondary); }
+
 /* AI 일치도 섹션(Day21) — "AI들이 얼마나 같은 이야기를 하고 있나" 3칸.
    프로토타입의 .ci-engines(SVG 아이콘 행)는 React 쪽에 아이콘 시스템이
    아직 없어서 이번엔 포트 안 함 — .ci-note 텍스트로 같은 정보를 대신 전달. */

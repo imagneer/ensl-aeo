@@ -53,6 +53,7 @@ import {
   type BrandFeatureCandidateToSave,
   type BrandFeatureConflictToSave,
   type BrandOneLinerToSave,
+  type TipContent,
   fetchBrandExpressionsForBrand,
   fetchValidEnginesForQueriesInPeriod,
   fetchActiveQueries,
@@ -64,6 +65,7 @@ import {
   saveBrandFeatureConflicts,
 } from './supabase';
 import { kstDayBoundsUtc } from './aggregator';
+import { ENGINE_NAMES, ENGINE_CONFIG, type EngineName } from './engine-config';
 import { retryWithBackoff, isRetryableLLMError } from './retry';
 
 // ── 1~2단계: 조회 + 고유 표현으로 축약 (코드) ──
@@ -918,6 +920,73 @@ async function detectAndSaveFeatureConflicts(
   return saveBrandFeatureConflicts(toSave);
 }
 
+// ── 팁 박스 데이터 기반 인사이트 (Day21, 코드 결정적 계산 — LLM 없음) ──
+
+/**
+ * "브랜드인지_누락요소3가지" 작업지시서 3-1 알고리즘을 그대로 구현.
+ * 조건을 하나라도 못 채우면 즉시 null(=화면에서 일반 팁 풀 사용)을
+ * 반환한다 — 애매하게 채우거나 문구를 바꿔서 억지로 만들지 않는다(작업
+ * 지시서 "주의" 문단, 명시적 요구사항).
+ *
+ * pool = 최종 선정된 특징(대표 특징 최대 3 + 지역맥락 0~1, 최대 4개).
+ * validEngineCount = 이 진단의 유효 관측 엔진 수(engineList.length) —
+ * "N개 AI 모두"의 분모이자 wide_feature의 100% 커버 기준.
+ */
+function computeTipContent(
+  pool: CandidateWithId[],
+  validEngineCount: number
+): TipContent {
+  if (pool.length === 0) return null;
+
+  // (특징 × 엔진) 0/1 매트릭스를 엔진별 합으로 접는다. group.members에
+  // 이미 engine이 붙어 있어서(brand_expressions) 별도 조회가 필요 없다.
+  const coverageByEngine = new Map<string, number>();
+  for (const engine of ENGINE_NAMES) {
+    const count = pool.filter((f) => f.group.members.some((m) => m.engine === engine)).length;
+    coverageByEngine.set(engine, count);
+  }
+
+  const maxCoverage = Math.max(...Array.from(coverageByEngine.values()));
+  if (maxCoverage < 2) return null; // 5단계: 비교할 만한 폭 자체가 없음
+
+  // 3단계: wide_feature — 이 진단의 유효 엔진 전부(=validEngineCount)를
+  // 커버한 특징 중에서 고른다. 하나도 없으면 "모두가 기억했다"고 말할
+  // 근거가 없으므로 스킵.
+  const wideCandidates = pool.filter((f) => f.group.coverage.engines === validEngineCount);
+  if (wideCandidates.length === 0) return null;
+  const wideFeature = wideCandidates[0];
+
+  // 4단계: narrow_engine — 최댓값의 50% 이하이면서 1 이상인 엔진 중 가장
+  // 낮은 것. ENGINE_NAMES 순서를 안정적인 동점 처리 기준으로 쓴다.
+  const narrowCandidates = ENGINE_NAMES.filter((e) => {
+    const c = coverageByEngine.get(e) ?? 0;
+    return c >= 1 && c <= maxCoverage * 0.5;
+  });
+  if (narrowCandidates.length === 0) return null;
+  const narrowEngine = narrowCandidates.reduce((min, e) =>
+    (coverageByEngine.get(e) ?? 0) < (coverageByEngine.get(min) ?? 0) ? e : min
+  );
+  const narrowCoverage = coverageByEngine.get(narrowEngine) ?? 0;
+
+  // 템플릿이 "그 엔진이 유일하게 커버한 특징명"(단수)을 요구한다 — narrow
+  // 엔진이 특징을 정확히 1개 커버할 때만 이름을 하나로 특정할 수 있다.
+  // 2개 이상 커버하면(가장 낮은 값이 1이 아니었던 경우) 템플릿을 못
+  // 채우므로 일반 팁으로 넘긴다(2026-09-02, 스펙에 명시 안 된 엣지케이스 —
+  // wide_feature 100%·narrow 0커버리지와 같은 원칙: 애매하면 스킵).
+  if (narrowCoverage !== 1) return null;
+  const narrowFeature = pool.find((f) => f.group.members.some((m) => m.engine === narrowEngine));
+  if (!narrowFeature) return null; // 방어적 — 위 필터 조건상 항상 찾아져야 함
+
+  return {
+    type: 'data',
+    wideFeature: wideFeature.group.label,
+    narrowEngine: ENGINE_CONFIG[narrowEngine as EngineName]?.label ?? narrowEngine,
+    narrowFeature: narrowFeature.group.label,
+    totalFeatures: pool.length,
+    n: wideFeature.group.coverage.engines,
+  };
+}
+
 // ── 오케스트레이션 ──
 
 export interface SynthesisResult {
@@ -1079,6 +1148,12 @@ export async function synthesizeBrandOneLiner(
       usedLocationContext = null;
     }
 
+    // 팁 박스(Day21) — "최종 선정된 특징 목록"은 재시도로 걸러진 뒤의
+    // selected/usedLocationContext, 즉 실제로 저장될 것과 정확히 같은
+    // 풀이어야 한다(작업지시서 3-1 "1. 최종 선정된 특징 목록 확보").
+    const tipPool = usedLocationContext ? [...selected, usedLocationContext] : selected;
+    const tipContent = computeTipContent(tipPool, engineList.length);
+
     const id = await saveBrandOneLiner({
       diagnosisId: diagnosis.id,
       brandId: diagnosis.brandId,
@@ -1095,6 +1170,7 @@ export async function synthesizeBrandOneLiner(
       engineList,
       generationLog:
         retryCount > 0 ? { originalFeatureCount, retryCount, excludedByReview } : null,
+      tipContent,
     });
     if (id) savedOneLinerIds.push(id);
   }

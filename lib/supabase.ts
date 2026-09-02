@@ -1568,6 +1568,22 @@ export interface GenerationLog {
 }
 
 /**
+ * 팁 박스(Day21)용 데이터 기반 인사이트. 조건(브랜드인지_누락요소3가지
+ * 작업지시서 3-1)을 정확히 만족할 때만 'data'로 저장하고, 하나라도
+ * 어긋나면 저장 자체를 안 한다(status 컬럼 null) — 화면은 null이면
+ * 일반 팁 풀에서 랜덤으로 하나를 고른다.
+ */
+export interface TipContentData {
+  type: 'data';
+  wideFeature: string;
+  narrowEngine: string; // 한글 라벨(예: "구글 AI Overviews") — 화면이 다시 변환할 필요 없게 그대로 저장
+  narrowFeature: string;
+  totalFeatures: number;
+  n: number; // wideFeature를 기억한 AI 개수(=유효 엔진 전체 수, "모두"에 대응하는 숫자)
+}
+export type TipContent = TipContentData | null;
+
+/**
  * ⚠️ oneLiner는 반드시 status와 같이 봐야 한다(2026-09-01, 루아 지적).
  * DB 컬럼에도 같은 내용의 COMMENT ON COLUMN을 걸어뒀다
  * (docs/day-brandoneliner-column-comment.sql).
@@ -1595,6 +1611,8 @@ export interface BrandOneLinerToSave {
   questionIds: string[];
   engineList: string[];
   generationLog?: GenerationLog | null;
+  /** 팁 박스(Day21)용 — '잘못된인지' 행에는 안 넣는다(해당 없음). */
+  tipContent?: TipContent;
 }
 
 export async function saveBrandOneLiner(input: BrandOneLinerToSave): Promise<string | null> {
@@ -1616,6 +1634,16 @@ export async function saveBrandOneLiner(input: BrandOneLinerToSave): Promise<str
             original_feature_count: input.generationLog.originalFeatureCount,
             retry_count: input.generationLog.retryCount,
             excluded_by_review: input.generationLog.excludedByReview,
+          }
+        : null,
+      tip_content: input.tipContent
+        ? {
+            type: 'data',
+            wide_feature: input.tipContent.wideFeature,
+            narrow_engine: input.tipContent.narrowEngine,
+            narrow_feature: input.tipContent.narrowFeature,
+            total_features: input.tipContent.totalFeatures,
+            n: input.tipContent.n,
           }
         : null,
     })
@@ -1686,6 +1714,74 @@ export async function fetchLatestDiagnosis(
 }
 
 /**
+ * 이 브랜드의 진단 회차 전체를 시작일 오름차순으로 가져온다(Day21 상단바
+ * — "N차 진단" 회차 번호는 별도 컬럼이 없어서 이 정렬 순서로 매긴다).
+ */
+export async function fetchDiagnosesForBrand(
+  brandId: string,
+  client: SupabaseClient
+): Promise<StoredDiagnosis[]> {
+  const { data, error } = await client
+    .from('diagnoses')
+    .select('id, brand_id, started_at, ended_at, status')
+    .eq('brand_id', brandId)
+    .order('started_at', { ascending: true });
+
+  if (error) {
+    console.error('진단 회차 목록 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    brandId: row.brand_id,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    status: row.status,
+  }));
+}
+
+/**
+ * 이 브랜드의 쿼리들 중 가장 최근 "성공" 관측 시각(UTC ISO)을 가져온다
+ * (Day21 상단바 "HH:MM 기준 업데이트"). ⚠️ 다른 화면들의 "유효 관측"
+ * (status=success && search_performed=true)과 일부러 다르다 — 여기는
+ * "마지막으로 API 호출이 성공한 시각"을 보여주는 것뿐이라, 응답률 계산에
+ * 쓰는 엄격한 기준까지 요구할 필요가 없다고 판단(2026-09-02).
+ */
+export async function fetchLastSuccessfulSnapshotAt(
+  brandId: string,
+  client: SupabaseClient
+): Promise<string | null> {
+  const { data: queryRows, error: queryError } = await client
+    .from('queries')
+    .select('id')
+    .eq('brand_id', brandId);
+
+  if (queryError) {
+    console.error('브랜드 쿼리 목록 조회 실패:', queryError);
+    return null;
+  }
+  const queryIds = (queryRows ?? []).map((q) => q.id);
+  if (queryIds.length === 0) return null;
+
+  const { data, error } = await client
+    .from('snapshots')
+    .select('executed_at')
+    .in('query_id', queryIds)
+    .eq('status', 'success')
+    .order('executed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('최근 성공 관측 조회 실패:', error);
+    return null;
+  }
+  return data?.executed_at ?? null;
+}
+
+/**
  * 오늘(KST) 기준으로 진단이 시작된 지 며칠째인지. 시작일을 1일째로 센다.
  * ⚠️ fetchExpiredDiagnoses에서 잡았던 것과 같은 종류의 timezone 함정을
  * 피하려고, 여기서도 전부 'Z'(UTC 취급)로 파싱한다 — '+09:00'로 만든
@@ -1710,6 +1806,7 @@ interface StoredBrandOneLinerRow {
   questionIds: string[];
   engineList: string[];
   reviewedByHuman: boolean;
+  tipContent: TipContent;
 }
 
 export interface BrandOneLinerConflict {
@@ -1740,6 +1837,8 @@ export type BrandOneLinerMain =
       reviewed: boolean;
       questionIds: string[];
       engineList: string[];
+      /** 팁 박스(Day21) — null이면 화면이 일반 팁 풀에서 랜덤으로 고른다. */
+      tipContent: TipContent;
     };
 
 export interface BrandOneLinerView {
@@ -1784,7 +1883,7 @@ export async function fetchLatestBrandOneLiner(
   const { data, error } = await client
     .from('brand_one_liners')
     .select(
-      'id, diagnosis_id, status, one_liner, selected_feature_ids, location_context_id, question_ids, engine_list, reviewed_by_human'
+      'id, diagnosis_id, status, one_liner, selected_feature_ids, location_context_id, question_ids, engine_list, reviewed_by_human, tip_content'
     )
     .eq('diagnosis_id', diagnosis.id);
 
@@ -1803,6 +1902,16 @@ export async function fetchLatestBrandOneLiner(
     questionIds: row.question_ids,
     engineList: row.engine_list,
     reviewedByHuman: row.reviewed_by_human,
+    tipContent: row.tip_content
+      ? {
+          type: 'data',
+          wideFeature: row.tip_content.wide_feature,
+          narrowEngine: row.tip_content.narrow_engine,
+          narrowFeature: row.tip_content.narrow_feature,
+          totalFeatures: row.tip_content.total_features,
+          n: row.tip_content.n,
+        }
+      : null,
   }));
 
   const isRestrictedRole = viewerRole === 'editor' || viewerRole === 'viewer';
@@ -1827,6 +1936,7 @@ export async function fetchLatestBrandOneLiner(
       reviewed: mainRow.reviewedByHuman,
       questionIds: mainRow.questionIds,
       engineList: mainRow.engineList,
+      tipContent: mainRow.tipContent,
     };
   }
 
