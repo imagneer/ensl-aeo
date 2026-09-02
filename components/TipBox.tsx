@@ -1,4 +1,5 @@
 import type { TipContentData } from '@/lib/supabase';
+import { MemoryTipsModal } from './MemoryTipsModal';
 
 /**
  * "엔슬의 팁" 박스(Day21) — 항상 100% 노출(작업지시서 3-1 확정 원칙).
@@ -7,8 +8,9 @@ import type { TipContentData } from '@/lib/supabase';
  * AEO 지식 팁 5개 중 하나를 렌더링 시점에 랜덤으로 고른다 — 저장 대상
  * 아님(작업지시서 3-3), 매 방문마다 달라져도 무방.
  *
- * "AI의 기억 다루는 법" 링크(프로토타입에 있던 .tip-btn)는 목적지
- * 콘텐츠 페이지가 아직 없어서 뺐다 — 갈 곳 없는 링크는 안 만든다.
+ * "AI의 기억 다루는 법" 버튼은 별도 페이지가 아니라 모달(MemoryTipsModal,
+ * Day21 후속 작업지시서)로 연결된다 — 처음엔 "갈 곳 없는 링크"로 판단해
+ * 뺐었는데, 프로토타입 확인 결과 페이지 라우팅이 필요 없는 모달이었다.
  */
 
 const GENERIC_TIPS = [
@@ -53,6 +55,7 @@ export function TipBox({ tipContent }: { tipContent: TipContentData | null }) {
       <span className="tip-badge">TIP</span>
       <p className="tip-title">{title ?? generic!.title}</p>
       <p className="tip-desc">{desc ?? generic!.desc}</p>
+      <MemoryTipsModal />
     </div>
   );
 }
