@@ -5,10 +5,14 @@ import { createServerClient } from '@supabase/ssr';
 // 바뀌었다(node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md
 // 확인, 2026-08-31). 파일명·export 이름 모두 `proxy`로 써야 한다.
 //
-// (dashboard) 라우트 그룹(브랜드 인지/현재위치/간극/변화추이)만 보호한다.
-// `/`(기존 데모 홈페이지)는 의도적으로 보호 대상에서 뺐다 — 로그인 없이
-// 계속 돌아가는 임시 화면으로 남기기로 함(2026-08-31 확인).
-const PROTECTED_PATHS = ['/brand-awareness', '/brand-position', '/gap', '/trend'];
+// (dashboard) 라우트 그룹(브랜드 인지/현재위치/간극/변화추이/질문상세)만
+// 보호한다. `/`(기존 데모 홈페이지)는 의도적으로 보호 대상에서 뺐다 —
+// 로그인 없이 계속 돌아가는 임시 화면으로 남기기로 함(2026-08-31 확인).
+// `/query`(질문상세, Day21)는 2026-09-02 추가 — query.brand_id가 데이터
+// 조회의 실제 기준이라 ?brand= 자동 리다이렉트가 여기선 필수는 아니지만,
+// 같은 보호 목록에 있으면 파라미터 없이 들어와도 사이드바 브랜드 컨텍스트가
+// 채워지는 부수 효과가 있어 그대로 포함시켰다.
+const PROTECTED_PATHS = ['/brand-awareness', '/brand-position', '/gap', '/trend', '/query'];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -94,5 +98,6 @@ export const config = {
     '/brand-position/:path*',
     '/gap/:path*',
     '/trend/:path*',
+    '/query/:path*',
   ],
 };

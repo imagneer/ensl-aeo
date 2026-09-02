@@ -222,6 +222,39 @@ export async function fetchActiveQueries(queryTypes?: string[]): Promise<StoredQ
     queryType: row.query_type,
   }));
 }
+
+/**
+ * 질문상세 화면(Day21)이 쓴다. fetchActiveQueries와 달리 세션 클라이언트를
+ * 받는다 — queries에 대한 RLS 정책(day19-step1-schema-rls.sql
+ * "queries_select_own_account")이 이미 authenticated에게 허용돼 있어서,
+ * 로그인된 사용자 화면에서는 admin을 쓸 이유가 없다(읽기는 supabase 세션
+ * 클라이언트, CLAUDE.md 보안 원칙).
+ */
+export async function fetchQueryById(
+  id: string,
+  client: SupabaseClient
+): Promise<StoredQuery | null> {
+  const { data, error } = await client
+    .from('queries')
+    .select('id, query_text, intent, brand_id, query_type')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('queries 단건 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    queryText: data.query_text,
+    intent: data.intent,
+    brandId: data.brand_id,
+    queryType: data.query_type,
+  };
+}
+
 // ── 수집 결과를 DB에 저장하기 ──
 
 import { ENGINE_CONFIG } from './engine-config';
@@ -1862,12 +1895,12 @@ export async function fetchBrandExpressionsByIds(
  * 가져오면 순환 참조가 생긴다. 공식이 바뀔 일은 거의 없지만(KST는 고정
  * UTC+9), 혹시 바꾸면 세 곳 다 같이 고칠 것.
  */
-function executedAtToKstDate(executedAt: string): string {
+export function executedAtToKstDate(executedAt: string): string {
   const kstMs = new Date(executedAt).getTime() + 9 * 60 * 60 * 1000;
   return new Date(kstMs).toISOString().slice(0, 10);
 }
 
-function truncateExcerpt(text: string, maxLength = 160): string {
+export function truncateExcerpt(text: string, maxLength = 160): string {
   const trimmed = text.trim();
   if (trimmed.length <= maxLength) return trimmed;
   return trimmed.slice(0, maxLength).trim() + '…';
@@ -1946,4 +1979,87 @@ export async function fetchQuestionEvidenceSummary(
         : null,
     };
   });
+}
+
+// ── 질문상세 화면 (Day21, /query/[id]) ──
+
+export interface QuerySnapshotMention {
+  brandId: string | null; // 미등록 브랜드(파서가 못 찾음)면 null
+  brandNameRaw: string;
+  isTarget: boolean;
+  sourceUrls: string[];
+  sourceDomains: string[];
+}
+
+export interface QuerySnapshotRecord {
+  id: string;
+  engine: string;
+  executedAt: string; // UTC ISO
+  status: 'success' | 'failed';
+  searchPerformed: boolean | null;
+  rawResponse: string;
+  mentions: QuerySnapshotMention[];
+}
+
+/**
+ * 질문 하나(diagnosis 기간 한정)의 모든 snapshot을, 각 snapshot에 달린
+ * mentions까지 붙여서 가져온다. 질문상세 화면의 5개 섹션(상단 통계·엔진별
+ * 그리드·매트릭스·함께 등장한 브랜드·근거 카드)이 전부 이 한 번의 조회
+ * 결과에서 파생된다 — lib/query-detail.ts의 순수 계산 함수들이 이 배열을
+ * 입력으로 받는다(코드 작성 전 루아 확인, 2026-09-02: RLS 정책이 이미
+ * authenticated를 허용하므로 세션 클라이언트를 쓴다 — admin 아님).
+ */
+export async function fetchQuerySnapshotsWithMentions(
+  queryId: string,
+  periodStart: string, // UTC ISO
+  periodEnd: string, // UTC ISO
+  client: SupabaseClient
+): Promise<QuerySnapshotRecord[]> {
+  const { data: snapshotRows, error: snapshotError } = await client
+    .from('snapshots')
+    .select('id, engine, executed_at, status, search_performed, raw_response')
+    .eq('query_id', queryId)
+    .gte('executed_at', periodStart)
+    .lt('executed_at', periodEnd)
+    .order('executed_at', { ascending: false });
+
+  if (snapshotError) {
+    console.error('질문상세용 snapshots 조회 실패:', snapshotError);
+    return [];
+  }
+  if (!snapshotRows || snapshotRows.length === 0) return [];
+
+  const snapshotIds = snapshotRows.map((s) => s.id);
+  const { data: mentionRows, error: mentionError } = await client
+    .from('mentions')
+    .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains')
+    .in('snapshot_id', snapshotIds);
+
+  if (mentionError) {
+    console.error('질문상세용 mentions 조회 실패:', mentionError);
+    // ⚠️ mentions가 비어도 snapshots(응답 자체)는 유효한 데이터라 그냥 버리지
+    // 않는다 — mentions만 빈 배열로 두고 계속 진행한다.
+  }
+
+  const mentionsBySnapshot = new Map<string, QuerySnapshotMention[]>();
+  for (const m of mentionRows ?? []) {
+    if (!mentionsBySnapshot.has(m.snapshot_id)) mentionsBySnapshot.set(m.snapshot_id, []);
+    mentionsBySnapshot.get(m.snapshot_id)!.push({
+      brandId: m.brand_id,
+      brandNameRaw: m.brand_name_raw,
+      isTarget: m.is_target,
+      sourceUrls: m.source_urls ?? [],
+      sourceDomains: m.source_domains ?? [],
+    });
+  }
+
+  return snapshotRows.map((s) => ({
+    id: s.id,
+    engine: s.engine,
+    executedAt: s.executed_at,
+    status: s.status,
+    searchPerformed: s.search_performed,
+    rawResponse: s.raw_response,
+    mentions: mentionsBySnapshot.get(s.id) ?? [],
+  }));
 }

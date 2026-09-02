@@ -7,13 +7,11 @@ import { useState } from 'react';
  * 기준, 대표 근거 선정)은 전부 데이터 레이어(lib/supabase.ts
  * fetchQuestionEvidenceSummary)에서 끝났다 — 여기는 결과를 그대로 그린다.
  *
- * ⚠️ "전체 답변과 출처 보기" 링크(프로토타입 원본에 있음)는 이번엔 뺐다 —
- * 그 링크가 가리키는 질문·답변 상세 페이지가 아직 Next.js 쪽에 없어서,
- * 존재하지 않는 곳으로 가는 버튼을 보여주는 게 더 정직하지 않다고 판단
- * (2026-09-02, 코난 판단 — 그 페이지가 만들어지면 이 자리에 다시 붙일 것).
- * 마찬가지 이유로 "출처: ..." 줄도 뺐다 — snapshots에는 출처 URL이 없고
- * (mentions 테이블에 있음), 이번 작업지시서 범위가 "snapshots/queries
- * 조회만"으로 명시돼 있어서 mentions 조인은 별도 작업으로 미룸.
+ * "전체 답변과 출처 보기" 링크는 질문상세 화면(/query/[id], Day21 후속
+ * 작업지시서)이 생기면서 연결했다 — 그 전까진 존재하지 않는 페이지로
+ * 가는 버튼이라 일부러 안 넣어뒀었다(2026-09-02). "출처: ..." 줄은
+ * 여전히 이 섹션엔 없다 — 이제 그 정보는 질문상세 화면에 있으니, 여기서
+ * 중복으로 보여줄 필요가 없다고 판단.
  */
 
 export interface QuestionEvidenceRow {
@@ -25,10 +23,11 @@ export interface QuestionEvidenceRow {
   representative: { engineLabel: string; dateLabel: string; excerpt: string } | null;
 }
 
-function EvidenceRow({ row }: { row: QuestionEvidenceRow }) {
+function EvidenceRow({ row, brandId }: { row: QuestionEvidenceRow; brandId: string | null }) {
   const [open, setOpen] = useState(false);
   const ratio = row.totalDays > 0 ? row.respondedDays / row.totalDays : 0;
   const isHigh = ratio >= 0.7; // 루아 확정(2026-09-02): 70% 이상 초록, 미만 노랑
+  const detailHref = `/query/${row.queryId}${brandId ? `?brand=${brandId}` : ''}`;
 
   return (
     <div className="list-row">
@@ -62,6 +61,9 @@ function EvidenceRow({ row }: { row: QuestionEvidenceRow }) {
               실제 근거 · {row.representative.engineLabel} · {row.representative.dateLabel}
             </p>
             <p className="quote">&quot;{row.representative.excerpt}&quot;</p>
+            <a href={detailHref} className="expand-btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+              전체 답변과 출처 보기 ↗
+            </a>
           </div>
         ) : (
           <p className="note">이 기간엔 유효 응답이 없었어요.</p>
@@ -71,7 +73,13 @@ function EvidenceRow({ row }: { row: QuestionEvidenceRow }) {
   );
 }
 
-export function QuestionEvidenceSection({ rows }: { rows: QuestionEvidenceRow[] }) {
+export function QuestionEvidenceSection({
+  rows,
+  brandId,
+}: {
+  rows: QuestionEvidenceRow[];
+  brandId?: string;
+}) {
   return (
     <>
       <h2 className="section-title" style={{ marginBottom: 4, marginTop: 40 }}>
@@ -86,7 +94,7 @@ export function QuestionEvidenceSection({ rows }: { rows: QuestionEvidenceRow[] 
       ) : (
         <div className="full-list" style={{ marginBottom: 40 }}>
           {rows.map((row) => (
-            <EvidenceRow key={row.queryId} row={row} />
+            <EvidenceRow key={row.queryId} row={row} brandId={brandId ?? null} />
           ))}
         </div>
       )}

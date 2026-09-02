@@ -180,7 +180,7 @@
   min-height: 100vh;
 }
 
-.app-shell button {
+.app-shell button, .app-shell a.expand-btn {
   font-family: inherit;
   background: transparent;
   border: 0.5px solid var(--border-strong);
@@ -189,7 +189,7 @@
   border-radius: var(--radius);
   padding: 6px 12px;
 }
-.app-shell button:hover { background: var(--surface-1); }
+.app-shell button:hover, .app-shell a.expand-btn:hover { background: var(--surface-1); }
 
 .sidebar { width: 220px; flex-shrink: 0; background: var(--surface-2); border-right: 0.5px solid var(--border); padding: 1rem; display: flex; flex-direction: column; gap: 4px; }
 .logo-row { display: flex; align-items: center; gap: 8px; padding: 8px 8px 16px; }

@@ -192,7 +192,7 @@ export default async function BrandAwarenessPage({
             totalEngines={totalEngines}
             conflicts={resolvedConflicts}
           />
-          <QuestionEvidenceSection rows={questionEvidenceRows} />
+          <QuestionEvidenceSection rows={questionEvidenceRows} brandId={brandId} />
         </>
       )}
     </>

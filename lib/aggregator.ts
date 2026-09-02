@@ -119,6 +119,17 @@ export function yesterdayKST(): string {
   return kstDate.toISOString().slice(0, 10);
 }
 
+/**
+ * 지금 이 순간 기준 "오늘"의 KST 날짜(위 yesterdayKST와 같은 공식, 하루
+ * 전으로 안 밀 뿐). 진단이 아직 진행 중(collecting, ended_at=null)일 때
+ * "지금까지의 기간"을 계산해야 하는 화면(질문상세 등)이 쓴다(2026-09-02).
+ */
+export function todayKST(): string {
+  const nowUtc = new Date();
+  const kstMs = nowUtc.getTime() + 9 * 60 * 60 * 1000;
+  return new Date(kstMs).toISOString().slice(0, 10);
+}
+
 // ── KST 날짜 경계 계산 ──
 
 /**
