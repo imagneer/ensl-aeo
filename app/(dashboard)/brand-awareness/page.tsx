@@ -5,12 +5,24 @@ import {
   fetchLatestBrandOneLiner,
   fetchBrandExpressionsByIds,
   fetchBrandFeatureCandidatesForDiagnosis,
+  fetchBrandFeatureConflictsForDiagnosis,
+  groupCandidatesByConsensus,
   fetchActiveQueries,
   type EvidenceItem,
   type StoredBrandFeatureCandidate,
 } from '@/lib/supabase';
 import { diagnosisDurationDays } from '@/lib/brand-one-liner';
 import { BrandOneLinerView } from '@/components/BrandOneLinerView';
+import {
+  AIConsensusSection,
+  type ConsensusItem,
+  type ResolvedFeatureConflict,
+} from '@/components/AIConsensusSection';
+import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
+
+function engineLabel(engine: string): string {
+  return ENGINE_CONFIG[engine as EngineName]?.label ?? engine;
+}
 
 export default async function BrandAwarenessPage({
   searchParams,
@@ -71,15 +83,75 @@ export default async function BrandAwarenessPage({
       : 0;
   const totalEngines = view.main.state === '완료' ? view.main.engineList.length : 0;
 
+  // AI 일치도 섹션(Day21) — 1·2번 칸은 candidates(잘못된인지 제외된 목록)를
+  // 그대로 재사용해 필터링만 한다(새 쿼리 없음, lib/supabase.ts 주석 참고).
+  const consensus = groupCandidatesByConsensus(candidates);
+  function toConsensusItem(c: StoredBrandFeatureCandidate): ConsensusItem {
+    const mentionedEngineLabels = Array.from(
+      new Set(evidenceFor(c.evidenceExpressionIds).map((e) => e.engine))
+    ).map(engineLabel);
+    return {
+      id: c.id,
+      label: c.featureName,
+      engineTotal: c.engineTotal,
+      engineCount: c.engineCount,
+      mentionedEngineLabels,
+    };
+  }
+  const allEngineItems = consensus.allEngines.map(toConsensusItem);
+  const someEngineItems = consensus.someEngines.map(toConsensusItem);
+
+  // 3번 칸(서로 다르게 설명하는 지점) — brand_feature_conflicts는 후보의
+  // id 참조만 갖고 있어서, 위에서 이미 불러온 allCandidates/evidence로 라벨과
+  // 대표 근거 문장을 붙여 화면에 바로 그릴 수 있는 형태로 만든다.
+  const conflictRows =
+    view.main.state === '완료'
+      ? await fetchBrandFeatureConflictsForDiagnosis(view.main.diagnosis.id, sessionClient)
+      : [];
+  const candidateById = new Map(allCandidates.map((c) => [c.id, c]));
+  const resolvedConflicts: ResolvedFeatureConflict[] = conflictRows
+    .map((row): ResolvedFeatureConflict | null => {
+      const a = candidateById.get(row.featureAId);
+      const b = candidateById.get(row.featureBId);
+      if (!a || !b) return null; // 참조 무결성이 깨진 경우 조용히 스킵(방어적)
+      const aEvidence = evidenceFor(a.evidenceExpressionIds)[0] ?? null;
+      const bEvidence = evidenceFor(b.evidenceExpressionIds)[0] ?? null;
+      return {
+        id: row.id,
+        summary: row.conflictSummary,
+        featureA: {
+          label: a.featureName,
+          engineLabel: aEvidence ? engineLabel(aEvidence.engine) : null,
+          sourceSentence: aEvidence?.sourceSentence ?? null,
+        },
+        featureB: {
+          label: b.featureName,
+          engineLabel: bEvidence ? engineLabel(bEvidence.engine) : null,
+          sourceSentence: bEvidence?.sourceSentence ?? null,
+        },
+      };
+    })
+    .filter((c): c is ResolvedFeatureConflict => !!c);
+
   return (
-    <BrandOneLinerView
-      brandName={brandName}
-      view={view}
-      candidates={candidates}
-      totalQuestions={totalQuestions}
-      totalDays={totalDays}
-      totalEngines={totalEngines}
-      evidenceFor={evidenceFor}
-    />
+    <>
+      <BrandOneLinerView
+        brandName={brandName}
+        view={view}
+        candidates={candidates}
+        totalQuestions={totalQuestions}
+        totalDays={totalDays}
+        totalEngines={totalEngines}
+        evidenceFor={evidenceFor}
+      />
+      {view.main.state === '완료' && (
+        <AIConsensusSection
+          allEngineItems={allEngineItems}
+          someEngineItems={someEngineItems}
+          totalEngines={totalEngines}
+          conflicts={resolvedConflicts}
+        />
+      )}
+    </>
   );
 }

@@ -411,3 +411,22 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .empty-state .es-icon { font-size: 28px; color: var(--text-muted); margin-bottom: 12px; }
 .empty-state .es-text { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
 .empty-state .es-sub { font-size: 12.5px; color: var(--text-muted); margin: 8px 0 0; }
+
+/* AI 일치도 섹션(Day21) — "AI들이 얼마나 같은 이야기를 하고 있나" 3칸.
+   프로토타입의 .ci-engines(SVG 아이콘 행)는 React 쪽에 아이콘 시스템이
+   아직 없어서 이번엔 포트 안 함 — .ci-note 텍스트로 같은 정보를 대신 전달. */
+.consensus-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 40px; align-items: start; }
+.consensus-col { border: 0.5px solid var(--border-strong); border-radius: 12px; padding: 16px; background: var(--surface-2); }
+.consensus-col.conflict { border-color: var(--bg-warning); background: #FEFBF3; }
+.consensus-col.conflict .cc-head { color: var(--text-warning); }
+.cc-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; margin: 0 0 3px; }
+.cc-head i { font-size: 15px; }
+.cc-sub { font-size: 11px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.5; }
+.consensus-item { padding: 9px 0; border-top: 0.5px solid var(--border); }
+.consensus-item:first-of-type { border-top: none; padding-top: 0; }
+.ci-name { font-size: 12.5px; font-weight: 500; margin: 0 0 5px; }
+.ci-note { font-size: 11px; color: var(--text-muted); margin: 6px 0 0; line-height: 1.55; }
+.ci-conflict-pair { font-size: 11.5px; line-height: 1.7; margin: 0; }
+.ci-conflict-pair .who { color: var(--text-secondary); }
+.ci-conflict-pair .say { color: var(--text-primary); font-weight: 500; }
+.ci-conflict-vs { text-align: center; font-size: 10px; color: var(--text-warning); margin: 2px 0; }

@@ -33,6 +33,13 @@
  *      자기가 확인하면 확증편향 위험이 있다는 지적을 받아 분리함, 2026-09-01)
  *   8. 실패 조건 있으면 그 특징 빼고 6~7 재시도 (최대 2회)
  *   9. brand_facts와 충돌하는 특징은 별도 행(잘못된인지)으로 분리 저장(원안 9번)
+ *   10. (Day21) AI 간 "서로 다르게 설명하는 지점" 탐지 — 위 9번까지 다 끝난
+ *      뒤 별도 단계로 붙는다. brand_feature_candidates 중 tier가 확정 또는
+ *      가능성있음인 것만 대상으로, LLM이 의미상 진짜 대립하는 쌍을 찾고
+ *      (탐지), 별도 호출로 재검수한 뒤(확증편향 방지, 7번과 같은 이유),
+ *      통과한 것만 brand_feature_conflicts에 저장한다. 실패해도 위
+ *      1~9번(브랜드 한 줄 본문)은 이미 끝났으므로 조용히 스킵하고
+ *      전체 진단 완료 처리를 막지 않는다.
  *
  * ⚠️ 아직 실측(live API) 검증 전이다.
  */
@@ -44,6 +51,7 @@ import {
   type FeatureCategory,
   type FeatureTier,
   type BrandFeatureCandidateToSave,
+  type BrandFeatureConflictToSave,
   type BrandOneLinerToSave,
   fetchBrandExpressionsForBrand,
   fetchValidEnginesForQueriesInPeriod,
@@ -53,6 +61,7 @@ import {
   completeDiagnosis,
   saveBrandOneLiner,
   saveBrandFeatureCandidates,
+  saveBrandFeatureConflicts,
 } from './supabase';
 import { kstDayBoundsUtc } from './aggregator';
 import { retryWithBackoff, isRetryableLLMError } from './retry';
@@ -615,11 +624,306 @@ async function reviewOneLiner(
   };
 }
 
+// ── 10단계: AI 간 "서로 다르게 설명하는 지점" 탐지 (LLM, Sonnet — Day21) ──
+
+/**
+ * 안전장치 1(작업지시서 3-3) — tier='관찰중'은 애초에 이 풀에 안 넣는다.
+ * 최소한의 반복성 있는 특징끼리만 비교해서, 우연한 1회성 표현을 "대립"으로
+ * 잡지 않기 위함. isConflicting(brand_facts와 충돌하는 "잘못된 인지")도
+ * 같이 뺀다 — "AI 사실과 다름"과 "AI끼리 서로 다르게 말함"은 다른 축이라
+ * 섞으면 화면에서 혼동을 준다(2026-09-02, 코난 판단 — 작업지시서에 명시는
+ * 없으나 v1.2에서 이미 다른 화면들이 잘못된인지를 별도 취급해온 것과 같은
+ * 방향으로 맞춤).
+ */
+function selectConflictDetectionPool(candidates: CandidateWithId[]): CandidateWithId[] {
+  return candidates.filter(
+    (c) => (c.group.tier === '확정' || c.group.tier === '가능성있음') && !c.group.isConflicting
+  );
+}
+
+interface RawConflictPair {
+  featureAIndex: number;
+  featureBIndex: number;
+  draftSummary: string;
+}
+
+function buildConflictDetectionPrompt(brandName: string, pool: CandidateWithId[]): string {
+  const numbered = pool
+    .map((c, i) => {
+      const examples = c.group.members
+        .slice(0, 3)
+        .map((m) => `    · "${m.sourceSentence}"`)
+        .join('\n');
+      return `[${i}] ${c.group.label} (${c.group.category})\n${examples}`;
+    })
+    .join('\n');
+
+  return `아래는 "${brandName}"에 대해 여러 AI 답변 엔진에서 반복 확인된 특징들이다. AI마다 브랜드를 설명하는 관점이 다를 수 있는데, 그중 서로 의미상 진짜 반대되거나 양립하기 어려운 설명이 있는지 찾아라.
+
+특징 목록:
+${numbered}
+
+규칙:
+1. 단순히 "다른 주제"인 쌍은 대립이 아니다(예: "임플란트 전문"과 "정밀 보철"은 서로 다른 진료 분야를 말할 뿐 반대되지 않는다) — 이런 건 절대 대립으로 보고하지 마라.
+2. 진짜 의미상 반대되는 쌍만 찾아라(예: "빠른 진료"와 "충분한 상담 시간"처럼 양립하기 어려운 설명, "저렴한 비용"과 "고가 프리미엄"처럼 정면으로 배치되는 포지셔닝).
+3. 확신이 없으면 아예 보고하지 마라 — 애매한 건 빼는 게 낫다.
+4. 대립 쌍마다 왜 대립인지 60자 안팎의 중립적인 한국어 문장으로 요약해라. "모순", "오류", "틀렸다" 같은 단정적·부정적 단어는 절대 쓰지 마라 — AI마다 설명이 다른 건 정상적인 현상이지 브랜드의 결함이 아니다. "~로 설명하는 AI가 있는 반면, ~로 설명하는 AI도 있습니다"처럼 사실을 나열하는 톤으로 써라.
+5. 대립이 하나도 없으면 빈 배열을 보고해라 — 억지로 만들지 마라.`;
+}
+
+async function detectFeatureConflicts(
+  brandName: string,
+  pool: CandidateWithId[]
+): Promise<RawConflictPair[]> {
+  if (pool.length < 2) return [];
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
+
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL_SONNET,
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: buildConflictDetectionPrompt(brandName, pool) }],
+      tools: [
+        {
+          name: 'report_feature_conflicts',
+          description: '서로 대립하는 특징 쌍을 보고한다.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              conflicts: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    feature_a_index: { type: 'integer' },
+                    feature_b_index: { type: 'integer' },
+                    summary: { type: 'string' },
+                  },
+                  required: ['feature_a_index', 'feature_b_index', 'summary'],
+                },
+              },
+            },
+            required: ['conflicts'],
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'report_feature_conflicts' },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  const blocks: { type: string; input?: unknown }[] = data.content ?? [];
+  const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
+  const rawConflicts = (toolUseBlock?.input as { conflicts?: unknown })?.conflicts;
+  if (!Array.isArray(rawConflicts)) return [];
+
+  const output: RawConflictPair[] = [];
+  const seen = new Set<string>(); // 무순서 쌍 중복 방지
+  for (const c of rawConflicts) {
+    if (typeof c !== 'object' || c === null) continue;
+    const a = (c as Record<string, unknown>).feature_a_index;
+    const b = (c as Record<string, unknown>).feature_b_index;
+    const summary = (c as Record<string, unknown>).summary;
+    if (typeof a !== 'number' || typeof b !== 'number' || a === b) continue;
+    if (a < 0 || a >= pool.length || b < 0 || b >= pool.length) continue;
+    if (typeof summary !== 'string' || summary.trim().length === 0) continue;
+
+    const key = [a, b].sort().join('-');
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    output.push({ featureAIndex: a, featureBIndex: b, draftSummary: summary.trim() });
+  }
+  return output;
+}
+
+interface ConfirmedConflictPair {
+  featureAIndex: number;
+  featureBIndex: number;
+  summary: string;
+}
+
+function buildConflictReviewPrompt(
+  brandName: string,
+  pool: CandidateWithId[],
+  pairs: RawConflictPair[]
+): string {
+  const pairBlocks = pairs
+    .map((p, i) => {
+      const a = pool[p.featureAIndex];
+      const b = pool[p.featureBIndex];
+      return `${i}. "${a.group.label}" ↔ "${b.group.label}"\n   제안된 요약: "${p.draftSummary}"`;
+    })
+    .join('\n');
+
+  return `아래는 "${brandName}"에 대해 자동으로 탐지된 "AI들이 다르게 설명하는 지점" 후보 쌍이다. 너는 이걸 검수하는 감사자다 — 진짜 의미상 반대되는지 의심하고 확인해라.
+
+후보 쌍:
+${pairBlocks}
+
+각 쌍에 대해 확인해라:
+1. 두 특징이 정말 의미상 서로 반대되거나 양립하기 어려운가? (단순히 다른 주제·다른 진료 분야면 반려)
+2. 요약 문장이 "모순", "오류", "틀렸다" 같은 단정적·부정적 단어를 안 썼는가?
+3. 요약 문장이 사실을 중립적으로 나열하는 톤인가?
+
+하나라도 걸리면 그 쌍은 통과시키지 마라(confirmed: false). 확신이 없어도 통과시키지 마라 — 애매하면 반려가 기본값이다. 통과한 쌍은 필요하면 요약 문장을 더 다듬어서 최종 문구로 내라(2번·3번 기준을 스스로 만족시키도록).`;
+}
+
+async function reviewFeatureConflicts(
+  brandName: string,
+  pool: CandidateWithId[],
+  pairs: RawConflictPair[]
+): Promise<ConfirmedConflictPair[]> {
+  if (pairs.length === 0) return [];
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
+
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL_SONNET,
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: buildConflictReviewPrompt(brandName, pool, pairs) }],
+      tools: [
+        {
+          name: 'report_conflict_review',
+          description: '대립 후보 쌍의 검수 결과를 보고한다.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              results: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    pair_index: { type: 'integer' },
+                    confirmed: { type: 'boolean' },
+                    summary: { type: 'string' },
+                  },
+                  required: ['pair_index', 'confirmed'],
+                },
+              },
+            },
+            required: ['results'],
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'report_conflict_review' },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  const blocks: { type: string; input?: unknown }[] = data.content ?? [];
+  const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
+  const rawResults = (toolUseBlock?.input as { results?: unknown })?.results;
+  if (!Array.isArray(rawResults)) return [];
+
+  const output: ConfirmedConflictPair[] = [];
+  for (const r of rawResults) {
+    if (typeof r !== 'object' || r === null) continue;
+    const idx = (r as Record<string, unknown>).pair_index;
+    const confirmed = (r as Record<string, unknown>).confirmed;
+    const summary = (r as Record<string, unknown>).summary;
+    if (typeof idx !== 'number' || idx < 0 || idx >= pairs.length) continue;
+    if (confirmed !== true) continue; // 안전장치 3 — 확신 없으면(false/누락) 저장 안 함
+
+    const finalSummary = typeof summary === 'string' && summary.trim().length > 0
+      ? summary.trim()
+      : pairs[idx].draftSummary;
+
+    output.push({
+      featureAIndex: pairs[idx].featureAIndex,
+      featureBIndex: pairs[idx].featureBIndex,
+      summary: finalSummary,
+    });
+  }
+  return output;
+}
+
+/**
+ * 10단계 전체를 감싸는 진입점 — 실패해도 예외를 밖으로 던지지 않는다.
+ * 이 단계는 브랜드 한 줄 본문(1~9단계)이 이미 저장된 뒤에 붙는 보조
+ * 인사이트라, 여기서 실패한다고 진단 완료 처리 자체를 막으면 안 된다
+ * (synthesizeBrandOneLiner 호출부 참고) — 실패 시 3번 칸은 그냥 빈
+ * 상태로 남고, 이는 "대립 없음"과 화면상 구분이 안 되지만 완료 기준
+ * 문서(4번)도 오늘은 실데이터 검증을 요구하지 않는다.
+ */
+async function detectAndSaveFeatureConflicts(
+  diagnosisId: string,
+  brandId: string,
+  brandName: string,
+  candidates: CandidateWithId[]
+): Promise<string[]> {
+  const pool = selectConflictDetectionPool(candidates);
+  if (pool.length < 2) return [];
+
+  let rawPairs: RawConflictPair[];
+  try {
+    rawPairs = await retryWithBackoff(
+      () => detectFeatureConflicts(brandName, pool),
+      3,
+      isRetryableLLMError
+    );
+  } catch (error) {
+    console.error(`특징 대립 탐지 실패 (diagnosis=${diagnosisId}):`, error);
+    return [];
+  }
+  if (rawPairs.length === 0) return [];
+
+  let confirmed: ConfirmedConflictPair[];
+  try {
+    confirmed = await retryWithBackoff(
+      () => reviewFeatureConflicts(brandName, pool, rawPairs),
+      3,
+      isRetryableLLMError
+    );
+  } catch (error) {
+    console.error(`특징 대립 검수 실패 (diagnosis=${diagnosisId}):`, error);
+    return [];
+  }
+  if (confirmed.length === 0) return [];
+
+  const toSave: BrandFeatureConflictToSave[] = confirmed.map((c) => ({
+    diagnosisId,
+    brandId,
+    featureAId: pool[c.featureAIndex].candidateId,
+    featureBId: pool[c.featureBIndex].candidateId,
+    conflictSummary: c.summary,
+  }));
+
+  return saveBrandFeatureConflicts(toSave);
+}
+
 // ── 오케스트레이션 ──
 
 export interface SynthesisResult {
   diagnosisId: string;
   savedOneLinerIds: string[];
+  savedConflictIds: string[];
 }
 
 /** 화면(브랜드 인지, Day 20)도 같은 "전체 진단일 수" 계산이 필요해서 export한다. */
@@ -669,7 +973,7 @@ export async function synthesizeBrandOneLiner(
       engineList,
     });
     if (id) savedOneLinerIds.push(id);
-    return { diagnosisId: diagnosis.id, savedOneLinerIds };
+    return { diagnosisId: diagnosis.id, savedOneLinerIds, savedConflictIds: [] };
   }
 
   const expressionsById = new Map(expressions.map((e) => [e.id, e]));
@@ -811,7 +1115,15 @@ export async function synthesizeBrandOneLiner(
     if (id) savedOneLinerIds.push(id);
   }
 
-  return { diagnosisId: diagnosis.id, savedOneLinerIds };
+  // ── (Day21) AI 간 "서로 다르게 설명하는 지점" — 위 본문과 별개 단계 ──
+  const savedConflictIds = await detectAndSaveFeatureConflicts(
+    diagnosis.id,
+    diagnosis.brandId,
+    brandName,
+    candidates
+  );
+
+  return { diagnosisId: diagnosis.id, savedOneLinerIds, savedConflictIds };
 }
 
 // ── 야간 크론 진입점 ──

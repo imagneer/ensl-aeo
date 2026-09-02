@@ -1416,6 +1416,110 @@ export async function fetchBrandFeatureCandidatesForDiagnosis(
   }));
 }
 
+// ── AI 일치도 섹션 — 1·2번 칸(공통/일부) (Day21) ──
+
+/**
+ * "모든 AI 공통"/"일부 AI에서만" 판정은 새 쿼리가 필요 없다 — 이미 화면이
+ * fetchBrandFeatureCandidatesForDiagnosis로 받아온 후보 목록을 그대로
+ * 필터링하면 된다(Day21 작업지시서가 제안한 fetchConsensusGroups처럼 DB에
+ * 다시 쿼리하면 같은 후보 목록을 두 번 불러오는 셈이라 이 함수로 대체함,
+ * 2026-09-02 — 세부는 코난 판단으로 위임된 부분).
+ */
+export interface ConsensusGroups {
+  /** tier='확정' && engine_count=engine_total — 모든 AI가 공통으로 확인 */
+  allEngines: StoredBrandFeatureCandidate[];
+  /** tier가 확정 또는 가능성있음이면서 일부(전부는 아닌) 엔진에서만 확인 */
+  someEngines: StoredBrandFeatureCandidate[];
+}
+
+export function groupCandidatesByConsensus(candidates: StoredBrandFeatureCandidate[]): ConsensusGroups {
+  return {
+    allEngines: candidates.filter((c) => c.tier === '확정' && c.engineCount === c.engineTotal),
+    someEngines: candidates.filter(
+      (c) =>
+        (c.tier === '확정' || c.tier === '가능성있음') &&
+        c.engineCount > 0 &&
+        c.engineCount < c.engineTotal
+    ),
+  };
+}
+
+// ── AI 일치도 섹션 — 3번 칸(서로 다르게 설명하는 지점) (Day21) ──
+
+export interface BrandFeatureConflictToSave {
+  diagnosisId: string;
+  brandId: string;
+  featureAId: string; // brand_feature_candidates.id
+  featureBId: string; // brand_feature_candidates.id
+  conflictSummary: string;
+}
+
+/** saveBrandFeatureCandidates와 같은 순서 보존 가정 + 개수 불일치 방어 로그 패턴. */
+export async function saveBrandFeatureConflicts(
+  conflicts: BrandFeatureConflictToSave[]
+): Promise<string[]> {
+  if (conflicts.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('brand_feature_conflicts')
+    .insert(
+      conflicts.map((c) => ({
+        diagnosis_id: c.diagnosisId,
+        brand_id: c.brandId,
+        feature_a_id: c.featureAId,
+        feature_b_id: c.featureBId,
+        conflict_summary: c.conflictSummary,
+      }))
+    )
+    .select('id');
+
+  if (error) {
+    console.error('brand_feature_conflicts 저장 실패:', error);
+    return [];
+  }
+  if (data.length !== conflicts.length) {
+    console.error(
+      `brand_feature_conflicts 저장 개수 불일치: 입력 ${conflicts.length}건, 반환 ${data.length}건`
+    );
+  }
+  return data.map((row) => row.id);
+}
+
+export interface StoredBrandFeatureConflict {
+  id: string;
+  diagnosisId: string;
+  brandId: string;
+  featureAId: string;
+  featureBId: string;
+  conflictSummary: string;
+}
+
+/** 화면의 3번 칸(서로 다르게 설명하는 지점)이 쓴다. */
+export async function fetchBrandFeatureConflictsForDiagnosis(
+  diagnosisId: string,
+  client: SupabaseClient
+): Promise<StoredBrandFeatureConflict[]> {
+  const { data, error } = await client
+    .from('brand_feature_conflicts')
+    .select('id, diagnosis_id, brand_id, feature_a_id, feature_b_id, conflict_summary')
+    .eq('diagnosis_id', diagnosisId);
+
+  if (error) {
+    console.error('brand_feature_conflicts 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    diagnosisId: row.diagnosis_id,
+    brandId: row.brand_id,
+    featureAId: row.feature_a_id,
+    featureBId: row.feature_b_id,
+    conflictSummary: row.conflict_summary,
+  }));
+}
+
 // ── 생성된 브랜드 한 줄 (brand_one_liners) ──
 
 /**
