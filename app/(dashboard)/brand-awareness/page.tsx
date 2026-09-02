@@ -4,9 +4,10 @@ import {
   fetchTargetBrands,
   fetchLatestBrandOneLiner,
   fetchBrandExpressionsByIds,
+  fetchBrandFeatureCandidatesForDiagnosis,
   fetchActiveQueries,
   type EvidenceItem,
-  type SelectedFeatureToSave,
+  type StoredBrandFeatureCandidate,
 } from '@/lib/supabase';
 import { diagnosisDurationDays } from '@/lib/brand-one-liner';
 import { BrandOneLinerView } from '@/components/BrandOneLinerView';
@@ -38,11 +39,17 @@ export default async function BrandAwarenessPage({
   const brandName = brands.find((b) => b.id === brandId)?.name ?? '이 브랜드';
   const totalQuestions = recognitionQuestions.length;
 
-  // 헤드라인 특징 + 잘못된 인지 특징의 근거를 한 번에 미리 조회
-  const mainFeatures: SelectedFeatureToSave[] =
-    view.main.state === '완료' ? view.main.selectedFeatures ?? [] : [];
-  const conflictFeatures: SelectedFeatureToSave[] = view.conflicting?.selectedFeatures ?? [];
-  const allEvidenceIds = [...mainFeatures, ...conflictFeatures].flatMap((f) => f.evidence);
+  // 전체 특징 후보(brand_feature_candidates, v1.2) — 헤드라인에 실제로 쓰인
+  // 3개뿐 아니라 tier가 낮아 아직 확정 안 된 것까지 화면에 다 보여준다.
+  // '잘못된인지' 행이 가리키는 후보는 일반 목록에서 제외한다.
+  const allCandidates: StoredBrandFeatureCandidate[] =
+    view.main.state === '완료'
+      ? await fetchBrandFeatureCandidatesForDiagnosis(view.main.diagnosis.id, sessionClient)
+      : [];
+  const conflictCandidateIds = new Set(view.conflicting?.featureCandidateIds ?? []);
+  const candidates = allCandidates.filter((c) => !conflictCandidateIds.has(c.id));
+
+  const allEvidenceIds = allCandidates.flatMap((c) => c.evidenceExpressionIds);
   const evidenceRows = await fetchBrandExpressionsByIds(allEvidenceIds, sessionClient);
   const evidenceById = new Map(evidenceRows.map((e) => [e.id, e]));
   function evidenceFor(ids: string[]): EvidenceItem[] {
@@ -68,6 +75,7 @@ export default async function BrandAwarenessPage({
     <BrandOneLinerView
       brandName={brandName}
       view={view}
+      candidates={candidates}
       totalQuestions={totalQuestions}
       totalDays={totalDays}
       totalEngines={totalEngines}

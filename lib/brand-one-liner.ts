@@ -1,12 +1,13 @@
 // lib/brand-one-liner.ts
 
 /**
- * 브랜드 한 줄 로직 4-2단계 — 진단 종료 시 합성 (2026-09-01)
+ * 브랜드 한 줄 로직 4-2단계 — 진단 종료 시 합성 (2026-09-01, v1.2: 2026-09-02 보완)
  * ═══════════════════════════════════════════════════════
  *
- * 작업지시서_브랜드한줄로직_v1.1.md 4-2, 원안(브랜드 한 줄 생성 로직 v1.0)
- * 4~10번을 구현한다. 진단 회차 하나가 끝날 때(diagnoses: collecting→completed)
- * 딱 한 번 실행된다 — lib/aggregator.ts처럼 매일 도는 게 아니다.
+ * 작업지시서_브랜드한줄로직_v1.1.md + v1.2_보완.md, 원안(브랜드 한 줄 생성
+ * 로직 v1.0) 4~10번을 구현한다. 진단 회차 하나가 끝날 때(diagnoses:
+ * collecting→completed) 딱 한 번 실행된다 — lib/aggregator.ts처럼 매일
+ * 도는 게 아니다.
  *
  * 처리 순서 (전부 이 파일 안에서):
  *   1. 그 진단 기간의 brand_expressions 전부 조회
@@ -14,12 +15,20 @@
  *      LLM에 보낼 항목 수가 줄어든다. 예: 7일치 수백 건이어도 서로 다른
  *      표현 문자열은 훨씬 적다.
  *   3. 그 "고유 표현 목록"을 LLM(Sonnet)에 보내서 비슷한 의미끼리 묶는다
- *      (원안 4번) — 원문은 그대로, memberIds로만 연결
- *   4. 묶음별로 최소기준(원안 5번) 통과 여부 + 강도(원안 6번)를 코드로
- *      계산 — 이건 결정적 계산이라 LLM에 안 맡긴다(top N을 LLM에 안
- *      맡기는 keyword-extractor.ts 원칙과 동일)
- *   5. 대표 특징 최대 3개 선정(원안 7번, 코드)
- *   6. 문장 작성(LLM, 원안 8번) — 근거 안에서만
+ *      (원안 4번) — 원문은 그대로, memberIds로만 연결. 지역/조건 표현은
+ *      '지역_조건' 카테고리로, 의미가 불분명한 묶음은 is_unclear로 표시(v1.2)
+ *   3-2. 노이즈 필터(v1.2 결정 1) — 독립 관측 1건뿐이거나 is_unclear인
+ *      묶음은 여기서 제외한다. brand_feature_candidates에 저장조차 안 함.
+ *   4. 묶음별로 최소기준(원안 5번) 통과 여부 + 강도(원안 6번) + tier(v1.2
+ *      결정 1)를 코드로 계산 — 이건 결정적 계산이라 LLM에 안 맡긴다
+ *      (top N을 LLM에 안 맡기는 keyword-extractor.ts 원칙과 동일)
+ *   4-2. 노이즈 필터를 통과한 묶음 전부를 brand_feature_candidates에 저장
+ *      (v1.2 결정 1 — 통과/미통과 관계없이 상한 없이 저장)
+ *   5. 대표 특징 최대 3개 선정(원안 7번, 코드) — category='지역_조건'은
+ *      이 풀에서 제외(v1.2 결정 2). 지역_조건 중 가장 강한 것 1개는 별도로
+ *      location_context_id에 선정(v1.2 결정 3)
+ *   6. 문장 작성(LLM, 원안 8번) — 근거 안에서만. 지역 맥락은 문맥으로만
+ *      쓰고 특징으로 나열하지 않는다(v1.2 결정 3-3)
  *   7. 자동 검수(LLM, 별도 호출 — 문장작성과 같은 호출 안에서 자기가 쓴 걸
  *      자기가 확인하면 확증편향 위험이 있다는 지적을 받아 분리함, 2026-09-01)
  *   8. 실패 조건 있으면 그 특징 빼고 6~7 재시도 (최대 2회)
@@ -32,7 +41,9 @@ import { ANTHROPIC_API_URL, ANTHROPIC_MODEL_SONNET, ANTHROPIC_VERSION } from './
 import {
   type StoredBrandExpression,
   type StoredDiagnosis,
-  type SelectedFeatureToSave,
+  type FeatureCategory,
+  type FeatureTier,
+  type BrandFeatureCandidateToSave,
   type BrandOneLinerToSave,
   fetchBrandExpressionsForBrand,
   fetchValidEnginesForQueriesInPeriod,
@@ -41,6 +52,7 @@ import {
   fetchExpiredDiagnoses,
   completeDiagnosis,
   saveBrandOneLiner,
+  saveBrandFeatureCandidates,
 } from './supabase';
 import { kstDayBoundsUtc } from './aggregator';
 import { retryWithBackoff, isRetryableLLMError } from './retry';
@@ -65,18 +77,17 @@ function buildUniqueExpressions(expressions: StoredBrandExpression[]): UniqueExp
 
 // ── 3단계: 비슷한 표현 묶기 (LLM, Sonnet) ──
 
-export type FeatureCategory =
-  | '치료분야'
-  | '진료체계'
-  | '의료역량'
-  | '환자상황'
-  | '이용편의성'
-  | '일반적_표현'; // '좋은 치과' 류 — 브랜드 구분력 없는 표현
+const CATEGORIES: FeatureCategory[] = [
+  '치료분야', '진료체계', '의료역량', '환자상황', '이용편의성', '지역_조건', '일반적표현',
+];
 
 interface RawGroup {
   label: string;
   category: FeatureCategory;
   memberIndexes: number[]; // uniqueExpressions 배열의 인덱스
+  /** LLM이 이 묶음의 의미가 불분명하다고 판단했는지(v1.2) — true면 노이즈
+   *  필터에서 제외되고 brand_feature_candidates에 저장조차 안 된다. */
+  isUnclear: boolean;
 }
 
 function buildGroupingPrompt(brandName: string, uniqueExpressions: UniqueExpression[]): string {
@@ -93,9 +104,11 @@ function buildGroupingPrompt(brandName: string, uniqueExpressions: UniqueExpress
    - 의료역량 (예: 고난도 케이스 경험, 전문의 보유 등)
    - 환자상황 (예: 특정 환자군 대응, 재수술 등)
    - 이용편의성 (예: 주말진료, 원스톱 진료 등 접근성/편의)
-   - 일반적_표현 ("좋은 치과", "신뢰할 만한", "전문적인"처럼 어느 병원에나 붙을 수 있는 표현)
+   - 지역_조건 (예: "강서구", "OO역 근처"처럼 지역명·위치 조건)
+   - 일반적표현 ("좋은 치과", "신뢰할 만한", "전문적인"처럼 어느 병원에나 붙을 수 있는 표현)
 4. 표현 하나는 반드시 하나의 묶음에만 속해야 한다(중복 배정 금지). 의미가 뚜렷이 다르면 억지로 묶지 말고 따로 둬라.
 5. 서로 무관한 표현을 하나의 묶음으로 억지로 합치지 마라.
+6. 묶음이 무엇을 말하는지 애매하거나(예: 표현들끼리 의미가 잘 안 이어짐) 판단이 어려우면 is_unclear를 true로 표시해라. 이런 묶음은 특징으로 반영되지 않는다.
 
 표현 목록:
 ${numbered}`;
@@ -138,11 +151,12 @@ async function groupSimilarExpressions(
                     label: { type: 'string' },
                     category: {
                       type: 'string',
-                      enum: ['치료분야', '진료체계', '의료역량', '환자상황', '이용편의성', '일반적_표현'],
+                      enum: CATEGORIES,
                     },
                     member_indexes: { type: 'array', items: { type: 'integer' } },
+                    is_unclear: { type: 'boolean' },
                   },
-                  required: ['label', 'category', 'member_indexes'],
+                  required: ['label', 'category', 'member_indexes', 'is_unclear'],
                 },
               },
             },
@@ -171,16 +185,13 @@ async function groupSimilarExpressions(
     throw new Error('LLM 응답의 groups 필드가 배열이 아닙니다.');
   }
 
-  const CATEGORIES: FeatureCategory[] = [
-    '치료분야', '진료체계', '의료역량', '환자상황', '이용편의성', '일반적_표현',
-  ];
-
   const output: RawGroup[] = [];
   for (const g of rawGroups) {
     if (typeof g !== 'object' || g === null) continue;
     const label = (g as Record<string, unknown>).label;
     const category = (g as Record<string, unknown>).category;
     const memberIndexes = (g as Record<string, unknown>).member_indexes;
+    const isUnclear = (g as Record<string, unknown>).is_unclear;
     if (typeof label !== 'string' || label.trim().length === 0) continue;
     if (!Array.isArray(memberIndexes)) continue;
 
@@ -188,14 +199,34 @@ async function groupSimilarExpressions(
       label: label.trim(),
       category: CATEGORIES.includes(category as FeatureCategory)
         ? (category as FeatureCategory)
-        : '일반적_표현', // 형식이 어긋나면 보수적으로 "일반적 표현"(구체성 인정 안 함) 처리
+        : '일반적표현', // 형식이 어긋나면 보수적으로 "일반적 표현"(구체성 인정 안 함) 처리
       memberIndexes: memberIndexes.filter((i): i is number => typeof i === 'number'),
+      isUnclear: isUnclear === true,
     });
   }
   return output;
 }
 
-// ── 4단계: 최소기준 필터 + 강도 계산 (코드, 결정적) ──
+// ── 3-2단계: 노이즈 필터 (코드, v1.2 결정 1) ──
+
+/**
+ * "묶기" 직후, "최소기준 판정" 이전에 적용하는 저장 자체의 문턱이다.
+ * 여기서 걸러진 묶음은 brand_feature_candidates에 아예 안 남는다 — tier가
+ * '관찰중'인 것과는 다르다(관찰중은 저장은 되지만 화면에서 약한 신호로
+ * 표시됨, 여긴 저장 자체를 안 함).
+ */
+function filterNoiseGroups(groups: RawGroup[], uniqueExpressions: UniqueExpression[]): RawGroup[] {
+  return groups.filter((g) => {
+    if (g.isUnclear) return false;
+    const totalMemberCount = g.memberIndexes
+      .map((i) => uniqueExpressions[i])
+      .filter((u): u is UniqueExpression => !!u)
+      .reduce((sum, u) => sum + u.memberIds.length, 0);
+    return totalMemberCount > 1; // 독립 관측 1건뿐이면 제외
+  });
+}
+
+// ── 4단계: 최소기준 판정 + 강도 + tier 계산 (코드, 결정적) ──
 
 export interface EvaluatedGroup {
   label: string;
@@ -203,16 +234,30 @@ export interface EvaluatedGroup {
   members: StoredBrandExpression[];
   coverage: { questions: number; engines: number; days: number };
   strength: number;
-  passesMinimum: boolean;
+  /**
+   * ⚠️ tier(v1.2)와 이름이 비슷해 보이지만 다른 걸 판정한다 — 헷갈리지 말 것.
+   *  passedMinCriteria: "질문2+/AI3+/날짜3+ 3개 전부" + "유도된 표현만으로
+   *    구성되지 않음"까지 포함한 v1.1 원래 통과 기준. 대표 특징·지역맥락·
+   *    잘못된인지 "선정"에 이 필드를 쓴다(선정 자격 판단용).
+   *  tier: v1.2 결정 1이 명시한 대로 딱 3개 조건(질문/AI/날짜)의 충족
+   *    개수만으로 정해진다 — 유도 여부는 안 본다. 화면 배지 표시 전용이라
+   *    passedMinCriteria가 false여도(예: 전부 유도된 표현) tier가 '확정'로
+   *    나올 수 있다. 이 괴리는 의도된 것이다: "확정(=반복확인됨)"이라는
+   *    표는 일반적인 경우를 설명한 것이지, 두 필드가 항상 같다는 뜻이 아님.
+   */
+  passedMinCriteria: boolean;
+  tier: FeatureTier;
   isConflicting: boolean;
 }
 
 /**
- * 판정 규칙(2026-09-01 확정):
+ * 판정 규칙(2026-09-01 확정, v1.2 결정 1로 tier 계산 추가):
  *  - 최소기준 5번("AI 3개 이상")은 절대값 고정. 유효 엔진 수가 3개 미만인
  *    특징은 이 절대 기준을 통과할 수 없다 — 의도된 동작이다(9/7~8 첫
  *    진단 종료 후 재검토 예정, 그 전엔 임의로 완화 안 함).
  *  - v1.1 ④(동적 분모)는 강도 계산(AI 범위 비율)에만 적용한다.
+ *  - tier는 질문/AI/날짜 3개 조건을 각각 독립 판정한 뒤 몇 개를 충족했는지로
+ *    센다 — 하나만 보고 판단하지 않는다(v1.2 결정 1).
  */
 function evaluateGroups(
   groups: RawGroup[],
@@ -239,11 +284,15 @@ function evaluateGroups(
     const nonInducedCount = members.filter((m) => !m.isInduced).length;
     const conflictCount = members.filter((m) => m.conflictsWithBrandFacts).length;
 
-    const passesMinimum =
-      questionSet.size >= 2 && // 인지 질문 3개 중 2개 이상
-      engineSet.size >= 3 && // AI 6개 중 3개 이상 (절대값, 위 주석 참고)
-      daySet.size >= 3 && // 서로 다른 날짜 3일 이상
-      nonInducedCount > 0; // 유도된 표현만으로 구성되지 않음
+    const qOk = questionSet.size >= 2; // 인지 질문 3개 중 2개 이상
+    const aOk = engineSet.size >= 3; // AI 6개 중 3개 이상 (절대값, 위 주석 참고)
+    const dOk = daySet.size >= 3; // 서로 다른 날짜 3일 이상
+    const conditionsMet = [qOk, aOk, dOk].filter(Boolean).length;
+
+    const tier: FeatureTier =
+      conditionsMet === 3 ? '확정' : conditionsMet === 2 ? '가능성있음' : '관찰중';
+
+    const passedMinCriteria = qOk && aOk && dOk && nonInducedCount > 0;
 
     const qRatio = totalRecognitionQuestions > 0
       ? Math.min(questionSet.size / totalRecognitionQuestions, 1)
@@ -257,14 +306,62 @@ function evaluateGroups(
       members,
       coverage: { questions: questionSet.size, engines: engineSet.size, days: daySet.size },
       strength: (qRatio + aRatio + dRatio) / 3,
-      passesMinimum,
+      passedMinCriteria,
+      tier,
       // 절반 넘게 브랜드 사실과 충돌하면 그 묶음 전체를 "충돌 특징"으로 본다.
       isConflicting: members.length > 0 && conflictCount > members.length / 2,
     };
   });
 }
 
-// ── 5단계: 대표 특징 선정 (코드) ──
+// ── 4-2단계: 전체 후보 저장 (코드, v1.2 결정 1) ──
+
+interface CandidateWithId {
+  group: EvaluatedGroup;
+  candidateId: string;
+}
+
+async function saveAllCandidates(
+  diagnosisId: string,
+  brandId: string,
+  evaluated: EvaluatedGroup[],
+  totalRecognitionQuestions: number,
+  totalDiagnosisDays: number,
+  validEngineCount: number
+): Promise<CandidateWithId[]> {
+  if (evaluated.length === 0) return [];
+
+  const toSave: BrandFeatureCandidateToSave[] = evaluated.map((g) => ({
+    diagnosisId,
+    brandId,
+    featureName: g.label,
+    category: g.category,
+    questionCount: g.coverage.questions,
+    questionTotal: totalRecognitionQuestions,
+    engineCount: g.coverage.engines,
+    engineTotal: validEngineCount,
+    dayCount: g.coverage.days,
+    dayTotal: totalDiagnosisDays,
+    passedMinCriteria: g.passedMinCriteria,
+    tier: g.tier,
+    intensityScore: g.strength,
+    evidenceExpressionIds: g.members.map((m) => m.id),
+  }));
+
+  const ids = await saveBrandFeatureCandidates(toSave);
+  // ⚠️ saveBrandFeatureCandidates가 입력 개수만큼 id를 못 돌려주면(저장 실패
+  // 등) zip이 어긋난다 — 그 경우 뒤 단계(대표 특징 선정)가 candidateId 없는
+  // 항목을 만나지 않도록 아예 빈 배열로 처리한다(부분 저장 상태로 진행하지 않음).
+  if (ids.length !== evaluated.length) {
+    console.error(
+      `brand_feature_candidates 저장 개수가 안 맞아 이번 진단(${diagnosisId})의 특징 선정을 건너뜁니다.`
+    );
+    return [];
+  }
+  return evaluated.map((group, i) => ({ group, candidateId: ids[i] }));
+}
+
+// ── 5단계: 대표 특징 + 지역 맥락 선정 (코드) ──
 
 /**
  * 원안 7번 우선순위(여러 질문 자발 등장 > 여러 AI·날짜 유지 > 구체적 > 근거
@@ -272,24 +369,27 @@ function evaluateGroups(
  * 균등하게 반영하는 지표라 정렬 기준으로 충분하다고 판단.
  *
  * "최소 하나는 구체적 특징이어야 한다"만 별도로 강제한다(원안 7번 마지막
- * 문단) — 상위 3개가 전부 '일반적_표현'이면 그 다음으로 강한 구체적 특징을
+ * 문단) — 상위 3개가 전부 '일반적표현'이면 그 다음으로 강한 구체적 특징을
  * 대신 끌어온다.
+ *
+ * category='지역_조건'은 이 풀에서 제외한다(v1.2 결정 2) — 지역은 대표
+ * 특징 슬롯을 안 쓰고 별도의 location_context_id를 쓴다.
  */
-function selectRepresentativeFeatures(evaluated: EvaluatedGroup[]): EvaluatedGroup[] {
-  const candidates = evaluated
-    .filter((g) => g.passesMinimum && !g.isConflicting)
-    .sort((a, b) => b.strength - a.strength);
+function selectRepresentativeFeatures(candidates: CandidateWithId[]): CandidateWithId[] {
+  const pool = candidates
+    .filter((c) => c.group.category !== '지역_조건' && c.group.passedMinCriteria && !c.group.isConflicting)
+    .sort((a, b) => b.group.strength - a.group.strength);
 
-  const top3 = candidates.slice(0, 3);
-  const hasConcrete = top3.some((g) => g.category !== '일반적_표현');
+  const top3 = pool.slice(0, 3);
+  const hasConcrete = top3.some((c) => c.group.category !== '일반적표현');
 
   if (!hasConcrete && top3.length > 0) {
-    const concrete = candidates.find(
-      (g) => g.category !== '일반적_표현' && !top3.includes(g)
+    const concrete = pool.find(
+      (c) => c.group.category !== '일반적표현' && !top3.includes(c)
     );
     if (concrete) {
       top3[top3.length - 1] = concrete;
-      top3.sort((a, b) => b.strength - a.strength);
+      top3.sort((a, b) => b.group.strength - a.group.strength);
     }
     // 구체적 특징이 후보군에 아예 없으면 여기서 못 바꾼다 — 8단계
     // 자동검수가 "구체적 특징 없음"을 걸러내야 하는 케이스로 남긴다.
@@ -298,31 +398,50 @@ function selectRepresentativeFeatures(evaluated: EvaluatedGroup[]): EvaluatedGro
   return top3;
 }
 
+/**
+ * category='지역_조건'인 후보 중 최소기준을 통과한 가장 강한 것 1개
+ * (v1.2 결정 3-2) — 대표 특징과 별개 슬롯이라 상한도 3개가 아니라 1개다.
+ */
+function selectLocationContext(candidates: CandidateWithId[]): CandidateWithId | null {
+  const pool = candidates
+    .filter((c) => c.group.category === '지역_조건' && c.group.passedMinCriteria && !c.group.isConflicting)
+    .sort((a, b) => b.group.strength - a.group.strength);
+  return pool[0] ?? null;
+}
+
 /** 원안 9번 "잘못된 인지" — 최소기준을 통과했지만 브랜드 사실과 충돌하는 특징 중 가장 강한 것 하나. */
-function findConflictingFeature(evaluated: EvaluatedGroup[]): EvaluatedGroup | null {
-  const conflicting = evaluated
-    .filter((g) => g.passesMinimum && g.isConflicting)
-    .sort((a, b) => b.strength - a.strength);
+function findConflictingFeature(candidates: CandidateWithId[]): CandidateWithId | null {
+  const conflicting = candidates
+    .filter((c) => c.group.passedMinCriteria && c.group.isConflicting)
+    .sort((a, b) => b.group.strength - a.group.strength);
   return conflicting[0] ?? null;
 }
 
 // ── 6단계: 문장 작성 (LLM, Sonnet) ──
 
-function buildWritingPrompt(brandName: string, features: EvaluatedGroup[]): string {
+function buildWritingPrompt(
+  brandName: string,
+  features: CandidateWithId[],
+  locationContext: CandidateWithId | null
+): string {
   const featureBlocks = features
-    .map((f, i) => {
-      const examples = f.members
+    .map((c, i) => {
+      const examples = c.group.members
         .slice(0, 3)
         .map((m) => `    · "${m.sourceSentence}"`)
         .join('\n');
-      return `${i + 1}. ${f.label}\n${examples}`;
+      return `${i + 1}. ${c.group.label}\n${examples}`;
     })
     .join('\n');
+
+  const locationBlock = locationContext
+    ? `\n\n지역/조건 맥락(문장에 특징으로 나열하지 말고, 자연스러운 문맥으로만 녹여라): ${locationContext.group.label}`
+    : '';
 
   return `"${brandName}"에 대해 AI 답변에서 반복 확인된 특징 ${features.length}개가 아래에 근거 문장과 함께 있다.
 
 선정된 특징과 근거:
-${featureBlocks}
+${featureBlocks}${locationBlock}
 
 위 근거 "안에서만" 정보를 써서, "${brandName}"을 설명하는 한 문장을 만들어라.
 
@@ -332,10 +451,15 @@ ${featureBlocks}
 3. 근거 문장의 부정적인 뉘앙스를 긍정적으로 바꾸지 마라.
 4. 사용자가 한 번에 이해할 수 있는 자연스러운 한국어 문장으로 써라.
 5. 60자 안팎의 한 문장으로 써라.
-6. 위에 선정된 특징만 조합해라 — 그 외 정보를 넣지 마라.`;
+6. 위에 선정된 특징만 조합해라 — 그 외 정보를 넣지 마라.
+7. 지역/조건 맥락이 주어졌으면 특징처럼 나열하지 말고 문맥으로만 자연스럽게 녹여 써라(예: "OO구에서 임플란트로 반복 언급됩니다"처럼). 주어지지 않았으면 무시해라.`;
 }
 
-async function writeOneLiner(brandName: string, features: EvaluatedGroup[]): Promise<string> {
+async function writeOneLiner(
+  brandName: string,
+  features: CandidateWithId[],
+  locationContext: CandidateWithId | null
+): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
 
@@ -349,7 +473,7 @@ async function writeOneLiner(brandName: string, features: EvaluatedGroup[]): Pro
     body: JSON.stringify({
       model: ANTHROPIC_MODEL_SONNET,
       max_tokens: 1024,
-      messages: [{ role: 'user', content: buildWritingPrompt(brandName, features) }],
+      messages: [{ role: 'user', content: buildWritingPrompt(brandName, features, locationContext) }],
       tools: [
         {
           name: 'report_one_liner',
@@ -389,23 +513,32 @@ interface ReviewResult {
   reason: string | null;
 }
 
-function buildReviewPrompt(brandName: string, oneLiner: string, features: EvaluatedGroup[]): string {
+function buildReviewPrompt(
+  brandName: string,
+  oneLiner: string,
+  features: CandidateWithId[],
+  locationContext: CandidateWithId | null
+): string {
   const featureBlocks = features
-    .map((f, i) => {
-      const examples = f.members
+    .map((c, i) => {
+      const examples = c.group.members
         .slice(0, 3)
         .map((m) => `    · "${m.sourceSentence}"`)
         .join('\n');
-      return `${i + 1}. ${f.label}\n${examples}`;
+      return `${i + 1}. ${c.group.label}\n${examples}`;
     })
     .join('\n');
+
+  const locationBlock = locationContext
+    ? `\n\n지역/조건 맥락(문장에 특징으로 나열되면 안 되고, 문맥으로만 쓰였어야 함): ${locationContext.group.label}`
+    : '';
 
   return `아래는 "${brandName}"에 대해 자동 생성된 브랜드 한 줄과, 그 근거로 쓰인 특징들이다. 너는 이 문장을 검수하는 역할이다 — 이 문장을 쓴 사람이 아니라, 이 문장이 규칙을 어겼는지 의심하고 확인하는 감사자다.
 
 생성된 문장: "${oneLiner}"
 
 사용된 특징과 근거:
-${featureBlocks}
+${featureBlocks}${locationBlock}
 
 아래 기준을 하나씩 확인해라:
 1. 문장에 쓰인 모든 내용에 위 근거가 있는가?
@@ -413,14 +546,16 @@ ${featureBlocks}
 3. 근거 문장의 긍정·부정 뉘앙스를 바꾸지 않았는가?
 4. 근거에 없는 내용을 추가하지 않았는가?
 5. 문장의 각 부분에서 위 근거 중 하나로 되짚어갈 수 있는가?
+6. 지역/조건 맥락이 주어졌다면, 특징처럼 나열되지 않고 문맥으로만 자연스럽게 쓰였는가?
 
-하나라도 어겼으면 어느 특징(위 번호) 때문인지 짚어서 보고해라. 근거가 모호하면 통과시키지 말고 위반으로 판단해라.`;
+하나라도 어겼으면 어느 특징(위 번호, 또는 지역/조건 맥락) 때문인지 짚어서 보고해라. 지역/조건 맥락이 위반의 원인이면 violated_feature_labels에 그 맥락의 이름을 그대로 넣어라. 근거가 모호하면 통과시키지 말고 위반으로 판단해라.`;
 }
 
 async function reviewOneLiner(
   brandName: string,
   oneLiner: string,
-  features: EvaluatedGroup[]
+  features: CandidateWithId[],
+  locationContext: CandidateWithId | null
 ): Promise<ReviewResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
@@ -435,7 +570,7 @@ async function reviewOneLiner(
     body: JSON.stringify({
       model: ANTHROPIC_MODEL_SONNET,
       max_tokens: 1024,
-      messages: [{ role: 'user', content: buildReviewPrompt(brandName, oneLiner, features) }],
+      messages: [{ role: 'user', content: buildReviewPrompt(brandName, oneLiner, features, locationContext) }],
       tools: [
         {
           name: 'report_review_result',
@@ -528,7 +663,8 @@ export async function synthesizeBrandOneLiner(
       brandId: diagnosis.brandId,
       status: '근거부족',
       oneLiner: null,
-      selectedFeatures: null,
+      selectedFeatureIds: null,
+      locationContextId: null,
       questionIds,
       engineList,
     });
@@ -543,10 +679,11 @@ export async function synthesizeBrandOneLiner(
     3,
     isRetryableLLMError
   );
+  const filteredGroups = filterNoiseGroups(rawGroups, uniqueExpressions);
 
   const totalDiagnosisDays = diagnosisDurationDays(diagnosis, endedAt);
   const evaluated = evaluateGroups(
-    rawGroups,
+    filteredGroups,
     uniqueExpressions,
     expressionsById,
     totalRecognitionQuestions,
@@ -554,8 +691,23 @@ export async function synthesizeBrandOneLiner(
     engineList.length
   );
 
+  // 노이즈 필터를 통과한 묶음 전부를 저장한다(v1.2 결정 1) — 통과/미통과
+  // 관계없이 상한 없이. 아래 대표 특징·지역맥락·잘못된인지 선정은 전부 이미
+  // 저장된 candidateId를 참조하는 방식으로 진행한다(brand_one_liners에는
+  // id 참조만 남긴다).
+  const candidates = await saveAllCandidates(
+    diagnosis.id,
+    diagnosis.brandId,
+    evaluated,
+    totalRecognitionQuestions,
+    totalDiagnosisDays,
+    engineList.length
+  );
+
+  const locationContext = selectLocationContext(candidates);
+
   // ── 정상 계열(반복확인/초기한줄/근거부족) ──
-  let selected = selectRepresentativeFeatures(evaluated);
+  let selected = selectRepresentativeFeatures(candidates);
 
   if (selected.length === 0) {
     const id = await saveBrandOneLiner({
@@ -563,7 +715,8 @@ export async function synthesizeBrandOneLiner(
       brandId: diagnosis.brandId,
       status: '근거부족',
       oneLiner: null,
-      selectedFeatures: null,
+      selectedFeatureIds: null,
+      locationContextId: null,
       questionIds,
       engineList,
     });
@@ -584,10 +737,11 @@ export async function synthesizeBrandOneLiner(
     const excludedByReview: string[] = [];
     let retryCount = 0;
     let oneLiner: string | null = null;
+    let usedLocationContext = locationContext;
 
     for (let attempt = 0; attempt < 2 && selected.length >= 2; attempt++) {
-      const draft = await writeOneLiner(brandName, selected);
-      const review = await reviewOneLiner(brandName, draft, selected);
+      const draft = await writeOneLiner(brandName, selected, usedLocationContext);
+      const review = await reviewOneLiner(brandName, draft, selected, usedLocationContext);
 
       if (review.passed) {
         oneLiner = draft;
@@ -599,7 +753,10 @@ export async function synthesizeBrandOneLiner(
         `브랜드 한 줄 자동검수 실패 (diagnosis=${diagnosis.id}, attempt=${attempt}): ${review.reason ?? '사유 미상'} — 위반 특징: ${review.violatedFeatureLabels.join(', ')}`
       );
       excludedByReview.push(...review.violatedFeatureLabels);
-      selected = selected.filter((f) => !review.violatedFeatureLabels.includes(f.label));
+      selected = selected.filter((c) => !review.violatedFeatureLabels.includes(c.group.label));
+      if (usedLocationContext && review.violatedFeatureLabels.includes(usedLocationContext.group.label)) {
+        usedLocationContext = null; // 지역 맥락이 위반 원인이면 다음 재시도에서 아예 뺀다
+      }
     }
 
     let status: BrandOneLinerToSave['status'];
@@ -608,27 +765,28 @@ export async function synthesizeBrandOneLiner(
     } else if (selected.length === 1) {
       status = '초기한줄';
       // 원안 9번 문구 그대로 — LLM 없이 결정적으로 조합(재현 가능).
-      oneLiner = `현재 AI는 ${brandName}를 '${selected[0].label}'와 가장 강하게 연결하고 있습니다. 아직 다른 특징은 반복 확인 중입니다.`;
+      // 지역 맥락은 이 템플릿에 안 넣는다 — "특징 2~3개만 조합"하는 완성된
+      // 문장 케이스에서만 문맥으로 쓰기로 했다(v1.2 결정 3-3 범위 밖).
+      oneLiner = `현재 AI는 ${brandName}를 '${selected[0].group.label}'와 가장 강하게 연결하고 있습니다. 아직 다른 특징은 반복 확인 중입니다.`;
+      usedLocationContext = null;
     } else {
       status = '근거부족';
       oneLiner = null;
+      usedLocationContext = null;
     }
-
-    const selectedFeaturesToSave: SelectedFeatureToSave[] | null =
-      status === '근거부족'
-        ? null
-        : selected.map((f) => ({
-            feature: f.label,
-            coverage: f.coverage,
-            evidence: f.members.map((m) => m.id),
-          }));
 
     const id = await saveBrandOneLiner({
       diagnosisId: diagnosis.id,
       brandId: diagnosis.brandId,
       status,
       oneLiner,
-      selectedFeatures: selectedFeaturesToSave,
+      selectedFeatureIds: status === '근거부족' ? null : selected.map((c) => c.candidateId),
+      // ⚠️ location_context_id는 "실제로 이 문장에 문맥으로 반영된"
+      // 후보만 가리킨다 — 그냥 통과했다는 사실만으로는 안 채운다(이름이
+      // 내용과 다르면 안 된다는 원칙, CLAUDE.md 절대원칙 1). 화면의
+      // "지역 정보로 반영됨" 배지는 이 컬럼이 아니라 후보 자체의
+      // category+tier로 별도 판단한다.
+      locationContextId: status === '반복확인' ? (usedLocationContext?.candidateId ?? null) : null,
       questionIds,
       engineList,
       generationLog:
@@ -638,20 +796,15 @@ export async function synthesizeBrandOneLiner(
   }
 
   // ── 잘못된 인지 (원안 9번, 정상 계열과 별개 행으로 저장) ──
-  const conflicting = findConflictingFeature(evaluated);
+  const conflicting = findConflictingFeature(candidates);
   if (conflicting) {
     const id = await saveBrandOneLiner({
       diagnosisId: diagnosis.id,
       brandId: diagnosis.brandId,
       status: '잘못된인지',
-      oneLiner: `AI가 '${conflicting.label}'라고 인지하고 있지만, 입력된 브랜드 정보와 일치하지 않습니다.`,
-      selectedFeatures: [
-        {
-          feature: conflicting.label,
-          coverage: conflicting.coverage,
-          evidence: conflicting.members.map((m) => m.id),
-        },
-      ],
+      oneLiner: `AI가 '${conflicting.group.label}'라고 인지하고 있지만, 입력된 브랜드 정보와 일치하지 않습니다.`,
+      selectedFeatureIds: [conflicting.candidateId],
+      locationContextId: null,
       questionIds,
       engineList,
     });

@@ -390,6 +390,8 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .row-stat { font-size: 11px; color: var(--text-muted); margin: 0; }
 .rep-tag { font-size: 11px; padding: 2px 8px; border-radius: var(--radius); white-space: nowrap; }
 .rep-tag.in-headline { color: var(--text-success); background: var(--bg-success); }
+.rep-tag.possible { color: var(--text-warning); background: var(--bg-warning); }
+.rep-tag.watching { color: var(--text-muted); border: 0.5px solid var(--border-strong); }
 .row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 1px; }
 .row-toggle { width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; }
 .row-panel { padding: 0 4px 12px; }

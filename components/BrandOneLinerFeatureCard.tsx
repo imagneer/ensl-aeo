@@ -10,7 +10,10 @@ interface Props {
   totalQuestions: number;
   totalEngines: number;
   totalDays: number;
-  isRepresentative: boolean;
+  /** tier(v1.2)를 그대로 노출 문구·스타일로 바꾼 값 — 판단(어떤 문구를
+   *  쓸지)은 이 컴포넌트가 아니라 호출부(BrandOneLinerView)가 이미 끝냈다. */
+  badgeText: string;
+  badgeClass: 'in-headline' | 'possible' | 'watching';
   evidence: EvidenceItem[];
 }
 
@@ -31,7 +34,8 @@ export function BrandOneLinerFeatureCard({
   totalQuestions,
   totalEngines,
   totalDays,
-  isRepresentative,
+  badgeText,
+  badgeClass,
   evidence,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -42,7 +46,7 @@ export function BrandOneLinerFeatureCard({
         <div className="row-left">
           <div className="row-title">
             <span className="row-name">{label}</span>
-            {isRepresentative && <span className="rep-tag in-headline">브랜드 한 줄에 반영됨</span>}
+            <span className={`rep-tag ${badgeClass}`}>{badgeText}</span>
           </div>
           <p className="row-stat">
             질문 {totalQuestions}개 중 {coverage.questions}개 · AI {totalEngines}개 중 {coverage.engines}개(유효 관측 기준)

@@ -1278,13 +1278,145 @@ export async function fetchValidEnginesForQueriesInPeriod(
   return Array.from(new Set(data.map((row) => row.engine)));
 }
 
-// ── 생성된 브랜드 한 줄 (brand_one_liners) ──
+// ── 특징 후보 (brand_feature_candidates, v1.2 결정 1) ──
 
-export interface SelectedFeatureToSave {
-  feature: string;
-  coverage: { questions: number; engines: number; days: number };
-  evidence: string[]; // brand_expressions.id 목록
+/**
+ * ⚠️ 값 철자가 정확히 DB CHECK 제약과 같아야 한다 — '지역_조건'은 언더스코어
+ * 있음, '일반적표현'은 없음(작업지시서 v1.2 원문 그대로, 일관성 없어 보여도
+ * 스키마와 정확히 맞춰야 insert가 안 막힌다).
+ */
+export type FeatureCategory =
+  | '치료분야'
+  | '진료체계'
+  | '의료역량'
+  | '환자상황'
+  | '이용편의성'
+  | '지역_조건'
+  | '일반적표현';
+
+/**
+ * 3개 조건(질문 2+/AI 3+/날짜 3+)을 각각 독립 판정한 뒤 몇 개를 충족했는지로
+ * 정해진다(v1.2 결정 1) — 하나만 보고 판단하지 않음.
+ *   3개 전부 → 확정(=반복확인됨) / 2개 → 가능성있음 / 0~1개 → 관찰중
+ */
+export type FeatureTier = '확정' | '가능성있음' | '관찰중';
+
+export interface BrandFeatureCandidateToSave {
+  diagnosisId: string;
+  brandId: string;
+  featureName: string;
+  category: FeatureCategory;
+  questionCount: number;
+  questionTotal: number;
+  engineCount: number;
+  engineTotal: number; // v1.1 ④ 동적 분모(유효 관측 엔진 수)
+  dayCount: number;
+  dayTotal: number;
+  passedMinCriteria: boolean;
+  tier: FeatureTier;
+  intensityScore: number; // 정렬용, 화면 비노출
+  evidenceExpressionIds: string[];
 }
+
+/**
+ * 여러 건을 한 INSERT로 저장하고 생성된 id를 같은 순서로 돌려준다.
+ * ⚠️ 호출부(lib/brand-one-liner.ts)가 이 반환 배열의 순서가 입력 배열
+ * 순서와 같다고 가정한다 — 단일 INSERT 문의 RETURNING은 실제로 입력 순서를
+ * 보존하지만, 방어적으로 개수가 안 맞으면 에러 로그를 남긴다.
+ */
+export async function saveBrandFeatureCandidates(
+  candidates: BrandFeatureCandidateToSave[]
+): Promise<string[]> {
+  if (candidates.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('brand_feature_candidates')
+    .insert(
+      candidates.map((c) => ({
+        diagnosis_id: c.diagnosisId,
+        brand_id: c.brandId,
+        feature_name: c.featureName,
+        category: c.category,
+        question_count: c.questionCount,
+        question_total: c.questionTotal,
+        engine_count: c.engineCount,
+        engine_total: c.engineTotal,
+        day_count: c.dayCount,
+        day_total: c.dayTotal,
+        passed_min_criteria: c.passedMinCriteria,
+        tier: c.tier,
+        intensity_score: c.intensityScore,
+        evidence_expression_ids: c.evidenceExpressionIds,
+      }))
+    )
+    .select('id');
+
+  if (error) {
+    console.error('brand_feature_candidates 저장 실패:', error);
+    return [];
+  }
+  if (data.length !== candidates.length) {
+    console.error(
+      `brand_feature_candidates 저장 개수 불일치: 입력 ${candidates.length}건, 반환 ${data.length}건`
+    );
+  }
+  return data.map((row) => row.id);
+}
+
+export interface StoredBrandFeatureCandidate {
+  id: string;
+  diagnosisId: string;
+  brandId: string;
+  featureName: string;
+  category: FeatureCategory;
+  questionCount: number;
+  questionTotal: number;
+  engineCount: number;
+  engineTotal: number;
+  dayCount: number;
+  dayTotal: number;
+  passedMinCriteria: boolean;
+  tier: FeatureTier | null;
+  evidenceExpressionIds: string[];
+}
+
+/** 화면의 "특징 목록"(전체 후보, tier 배지용, v1.2 결정 1)이 쓴다. */
+export async function fetchBrandFeatureCandidatesForDiagnosis(
+  diagnosisId: string,
+  client: SupabaseClient
+): Promise<StoredBrandFeatureCandidate[]> {
+  const { data, error } = await client
+    .from('brand_feature_candidates')
+    .select(
+      'id, diagnosis_id, brand_id, feature_name, category, question_count, question_total, engine_count, engine_total, day_count, day_total, passed_min_criteria, tier, evidence_expression_ids'
+    )
+    .eq('diagnosis_id', diagnosisId);
+
+  if (error) {
+    console.error('brand_feature_candidates 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    diagnosisId: row.diagnosis_id,
+    brandId: row.brand_id,
+    featureName: row.feature_name,
+    category: row.category,
+    questionCount: row.question_count,
+    questionTotal: row.question_total,
+    engineCount: row.engine_count,
+    engineTotal: row.engine_total,
+    dayCount: row.day_count,
+    dayTotal: row.day_total,
+    passedMinCriteria: row.passed_min_criteria,
+    tier: row.tier,
+    evidenceExpressionIds: row.evidence_expression_ids,
+  }));
+}
+
+// ── 생성된 브랜드 한 줄 (brand_one_liners) ──
 
 /**
  * 자동검수 재시도 과정을 남기는 디버깅용 로그(2026-09-01, 루아 제안).
@@ -1313,7 +1445,16 @@ export interface BrandOneLinerToSave {
   brandId: string;
   status: '반복확인' | '초기한줄' | '근거부족' | '잘못된인지';
   oneLiner: string | null; // 근거부족이면 null — 위 주석 참고
-  selectedFeatures: SelectedFeatureToSave[] | null;
+  /**
+   * brand_feature_candidates.id 목록, 최대 3개, category≠'지역_조건'
+   * (v1.2 결정 2). '잘못된인지' 행은 여기에 충돌 후보 id 1개만 넣는다 —
+   * brand_feature_candidates 자체에 충돌 여부 컬럼이 없어서, 일반 특징
+   * 목록에서 이 행을 빼는 건 화면(BrandOneLinerView)이 "잘못된인지 행의
+   * selectedFeatureIds에 들어있으면 일반 목록에서 제외"로 처리한다.
+   */
+  selectedFeatureIds: string[] | null;
+  /** brand_feature_candidates.id, category='지역_조건'인 것 중 1개(v1.2 결정 3). */
+  locationContextId: string | null;
   questionIds: string[];
   engineList: string[];
   generationLog?: GenerationLog | null;
@@ -1327,10 +1468,11 @@ export async function saveBrandOneLiner(input: BrandOneLinerToSave): Promise<str
       brand_id: input.brandId,
       status: input.status,
       one_liner: input.oneLiner,
-      selected_features: input.selectedFeatures,
+      selected_feature_ids: input.selectedFeatureIds,
+      location_context_id: input.locationContextId,
       question_ids: input.questionIds,
       engine_list: input.engineList,
-      logic_version: 'v1.1',
+      logic_version: 'v1.2',
       reviewed_by_human: false, // MVP: 루아가 Supabase 대시보드에서 직접 true로 변경
       generation_log: input.generationLog
         ? {
@@ -1426,7 +1568,8 @@ interface StoredBrandOneLinerRow {
   diagnosisId: string;
   status: '반복확인' | '초기한줄' | '근거부족' | '잘못된인지';
   oneLiner: string | null;
-  selectedFeatures: SelectedFeatureToSave[] | null;
+  selectedFeatureIds: string[] | null;
+  locationContextId: string | null;
   questionIds: string[];
   engineList: string[];
   reviewedByHuman: boolean;
@@ -1434,7 +1577,9 @@ interface StoredBrandOneLinerRow {
 
 export interface BrandOneLinerConflict {
   oneLiner: string;
-  selectedFeatures: SelectedFeatureToSave[] | null;
+  /** brand_feature_candidates.id 목록 — 화면이 일반 특징 목록에서 이걸
+   *  제외해야 한다(v1.2, "잘못된인지"는 일반 목록에 안 섞임). */
+  featureCandidateIds: string[];
 }
 
 export type BrandOneLinerMain =
@@ -1447,7 +1592,11 @@ export type BrandOneLinerMain =
        *  아니다(BrandOneLinerToSave 위 주석 참고). 그대로 표시는 해도 되지만
        *  "완성된 한 줄"인 것처럼 다른 곳에 재인용하지 말 것. */
       oneLiner: string | null;
-      selectedFeatures: SelectedFeatureToSave[] | null;
+      /** brand_feature_candidates.id 목록(최대 3, category≠'지역_조건').
+       *  실제 특징 데이터는 fetchBrandFeatureCandidatesForDiagnosis로
+       *  diagnosis.id 기준 한 번에 불러와서 이 id들로 매칭한다(v1.2). */
+      selectedFeatureIds: string[];
+      locationContextId: string | null;
       /** owner/admin에게만 의미 있는 플래그 — editor/viewer는 이 값이 false인
        *  콘텐츠 자체를 절대 못 받으므로(항상 '진단중'으로 폴백), 여기까지
        *  왔다는 건 owner/admin이거나 이미 검토된 콘텐츠라는 뜻. */
@@ -1498,7 +1647,7 @@ export async function fetchLatestBrandOneLiner(
   const { data, error } = await client
     .from('brand_one_liners')
     .select(
-      'id, diagnosis_id, status, one_liner, selected_features, question_ids, engine_list, reviewed_by_human'
+      'id, diagnosis_id, status, one_liner, selected_feature_ids, location_context_id, question_ids, engine_list, reviewed_by_human'
     )
     .eq('diagnosis_id', diagnosis.id);
 
@@ -1512,7 +1661,8 @@ export async function fetchLatestBrandOneLiner(
     diagnosisId: row.diagnosis_id,
     status: row.status,
     oneLiner: row.one_liner,
-    selectedFeatures: row.selected_features,
+    selectedFeatureIds: row.selected_feature_ids,
+    locationContextId: row.location_context_id,
     questionIds: row.question_ids,
     engineList: row.engine_list,
     reviewedByHuman: row.reviewed_by_human,
@@ -1535,7 +1685,8 @@ export async function fetchLatestBrandOneLiner(
       diagnosis: { id: diagnosis.id, startedAt: diagnosis.startedAt, endedAt: diagnosis.endedAt },
       status: mainRow.status as '반복확인' | '초기한줄' | '근거부족',
       oneLiner: mainRow.oneLiner,
-      selectedFeatures: mainRow.selectedFeatures,
+      selectedFeatureIds: mainRow.selectedFeatureIds ?? [],
+      locationContextId: mainRow.locationContextId,
       reviewed: mainRow.reviewedByHuman,
       questionIds: mainRow.questionIds,
       engineList: mainRow.engineList,
@@ -1544,7 +1695,7 @@ export async function fetchLatestBrandOneLiner(
 
   const conflicting: BrandOneLinerConflict | null =
     conflictRow && conflictRow.oneLiner && (!isRestrictedRole || conflictRow.reviewedByHuman)
-      ? { oneLiner: conflictRow.oneLiner, selectedFeatures: conflictRow.selectedFeatures }
+      ? { oneLiner: conflictRow.oneLiner, featureCandidateIds: conflictRow.selectedFeatureIds ?? [] }
       : null;
 
   return { main, conflicting };
