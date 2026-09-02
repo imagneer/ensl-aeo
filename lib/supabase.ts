@@ -1851,3 +1851,99 @@ export async function fetchBrandExpressionsByIds(
     };
   });
 }
+
+// ── 질문별 근거 섹션 "무엇을 근거로 판단했을까?" (Day21) ──
+
+/**
+ * executed_at(UTC timestamptz)을 KST 'YYYY-MM-DD'로 변환한다.
+ * ⚠️ lib/aggregator.ts의 yesterdayKST()/kstDayBoundsUtc()와 같은 공식
+ * (UTC+9)이지만 여기 독립적으로 둔다 — aggregator.ts가 이미 이 파일의
+ * 함수들을 가져다 쓰고 있어서(fetchActiveQueries 등), 반대 방향으로
+ * 가져오면 순환 참조가 생긴다. 공식이 바뀔 일은 거의 없지만(KST는 고정
+ * UTC+9), 혹시 바꾸면 세 곳 다 같이 고칠 것.
+ */
+function executedAtToKstDate(executedAt: string): string {
+  const kstMs = new Date(executedAt).getTime() + 9 * 60 * 60 * 1000;
+  return new Date(kstMs).toISOString().slice(0, 10);
+}
+
+function truncateExcerpt(text: string, maxLength = 160): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  return trimmed.slice(0, maxLength).trim() + '…';
+}
+
+export interface QuestionEvidenceSummary {
+  queryId: string;
+  /** 진단 기간 중 이 질문에 유효 응답이 1건이라도 있었던 날짜 수(distinct). */
+  respondedDays: number;
+  /** 유효 응답을 준 적 있는 엔진 목록(distinct, 응답 없음 배열 아님). */
+  respondedEngines: string[];
+  /** 유효 snapshot 중 가장 최근 것 하나 — "특정 특징과 연결할 필요 없음"(작업지시서 2-4). */
+  representative: {
+    engine: string;
+    executedAt: string;
+    excerpt: string;
+  } | null;
+}
+
+/**
+ * "무엇을 근거로 판단했을까?" 섹션(Day21)이 쓴다. 새 판단 로직 없음 —
+ * snapshots를 그대로 집계만 한다.
+ *
+ * ⚠️ "유효 응답" 기준은 이 프로젝트 전체가 공유하는 정의(lib/aggregator.ts
+ * "규칙 C: 유효 관측치")와 반드시 같아야 한다 — status='success' &&
+ * search_performed=true 둘 다. 이 화면만 다른 기준(예: status만)을 쓰면
+ * 노출률 등 다른 화면과 같은 날짜의 같은 관측을 서로 다르게 세는 정합성
+ * 문제가 생긴다(2026-09-02, 루아 확인 — 작업지시서 원안의 SQL 예시는
+ * status만 걸러서 이것과 달랐음, 확인 후 수정함).
+ */
+export async function fetchQuestionEvidenceSummary(
+  queryIds: string[],
+  periodStart: string, // UTC ISO (kstDayBoundsUtc(diagnosis.startedAt).periodStart)
+  periodEnd: string // UTC ISO (kstDayBoundsUtc(diagnosis.endedAt ?? diagnosis.startedAt).periodEnd)
+): Promise<QuestionEvidenceSummary[]> {
+  if (queryIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('snapshots')
+    .select('query_id, engine, executed_at, raw_response')
+    .in('query_id', queryIds)
+    .eq('status', 'success')
+    .eq('search_performed', true)
+    .gte('executed_at', periodStart)
+    .lt('executed_at', periodEnd)
+    .order('executed_at', { ascending: false }); // 최신순 — 그룹별 첫 행이 곧 대표 근거
+
+  if (error) {
+    console.error('질문별근거용 snapshots 조회 실패:', error);
+    return [];
+  }
+
+  const rows = data ?? [];
+  const byQuery = new Map<string, typeof rows>();
+  for (const row of rows) {
+    if (!byQuery.has(row.query_id)) byQuery.set(row.query_id, []);
+    byQuery.get(row.query_id)!.push(row);
+  }
+
+  return queryIds.map((queryId) => {
+    const queryRows = byQuery.get(queryId) ?? [];
+    const respondedDays = new Set(queryRows.map((r) => executedAtToKstDate(r.executed_at))).size;
+    const respondedEngines = Array.from(new Set(queryRows.map((r) => r.engine)));
+    const latest = queryRows[0] ?? null; // executed_at desc 정렬 유지됨
+
+    return {
+      queryId,
+      respondedDays,
+      respondedEngines,
+      representative: latest
+        ? {
+            engine: latest.engine,
+            executedAt: latest.executed_at,
+            excerpt: truncateExcerpt(latest.raw_response),
+          }
+        : null,
+    };
+  });
+}

@@ -7,17 +7,24 @@ import {
   fetchBrandFeatureCandidatesForDiagnosis,
   fetchBrandFeatureConflictsForDiagnosis,
   groupCandidatesByConsensus,
+  fetchQuestionEvidenceSummary,
   fetchActiveQueries,
   type EvidenceItem,
   type StoredBrandFeatureCandidate,
+  type QuestionEvidenceSummary,
 } from '@/lib/supabase';
 import { diagnosisDurationDays } from '@/lib/brand-one-liner';
+import { kstDayBoundsUtc } from '@/lib/aggregator';
 import { BrandOneLinerView } from '@/components/BrandOneLinerView';
 import {
   AIConsensusSection,
   type ConsensusItem,
   type ResolvedFeatureConflict,
 } from '@/components/AIConsensusSection';
+import {
+  QuestionEvidenceSection,
+  type QuestionEvidenceRow,
+} from '@/components/QuestionEvidenceSection';
 import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
 
 function engineLabel(engine: string): string {
@@ -133,6 +140,39 @@ export default async function BrandAwarenessPage({
     })
     .filter((c): c is ResolvedFeatureConflict => !!c);
 
+  // 4번 섹션 "무엇을 근거로 판단했을까?"(Day21) — 새 판단 로직 없이
+  // snapshots를 진단 기간(KST) 기준으로 그대로 집계만 한다.
+  const questionEvidenceSummaries: QuestionEvidenceSummary[] =
+    view.main.state === '완료'
+      ? await fetchQuestionEvidenceSummary(
+          recognitionQuestions.map((q) => q.id),
+          kstDayBoundsUtc(view.main.diagnosis.startedAt).periodStart,
+          kstDayBoundsUtc(view.main.diagnosis.endedAt ?? view.main.diagnosis.startedAt).periodEnd
+        )
+      : [];
+  const evidenceSummaryByQueryId = new Map(questionEvidenceSummaries.map((s) => [s.queryId, s]));
+  const questionEvidenceRows: QuestionEvidenceRow[] = recognitionQuestions.map((q) => {
+    const summary = evidenceSummaryByQueryId.get(q.id);
+    return {
+      queryId: q.id,
+      queryText: q.queryText,
+      respondedDays: summary?.respondedDays ?? 0,
+      totalDays,
+      respondedEngineLabels: (summary?.respondedEngines ?? []).map(engineLabel),
+      representative: summary?.representative
+        ? {
+            engineLabel: engineLabel(summary.representative.engine),
+            dateLabel: new Date(summary.representative.executedAt).toLocaleDateString('ko-KR', {
+              timeZone: 'Asia/Seoul',
+              month: 'long',
+              day: 'numeric',
+            }),
+            excerpt: summary.representative.excerpt,
+          }
+        : null,
+    };
+  });
+
   return (
     <>
       <BrandOneLinerView
@@ -145,12 +185,15 @@ export default async function BrandAwarenessPage({
         evidenceFor={evidenceFor}
       />
       {view.main.state === '완료' && (
-        <AIConsensusSection
-          allEngineItems={allEngineItems}
-          someEngineItems={someEngineItems}
-          totalEngines={totalEngines}
-          conflicts={resolvedConflicts}
-        />
+        <>
+          <AIConsensusSection
+            allEngineItems={allEngineItems}
+            someEngineItems={someEngineItems}
+            totalEngines={totalEngines}
+            conflicts={resolvedConflicts}
+          />
+          <QuestionEvidenceSection rows={questionEvidenceRows} />
+        </>
       )}
     </>
   );
