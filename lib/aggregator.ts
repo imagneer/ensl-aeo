@@ -65,6 +65,8 @@ import {
   updateKeywordExtractionResult,
   fetchBrandFacts,
   saveBrandExpressions,
+  fetchDailyRowsWithCompetitorData,
+  updateCompetitorData,
   type SnapshotForAggregation,
   type MentionForAggregation,
   type AggregatedMetricToSave,
@@ -425,23 +427,42 @@ export async function aggregateOne(
     ? targetMentions.some((m) => m.sourceDomains?.includes(targetDomain))
     : false;
 
-  const competitorData: AggregatedMetricToSave['competitorData'] =
-    otherBrands.length > 0
-      ? Object.fromEntries(
-          otherBrands.map((b) => {
-            const stats = computeBrandStats(b.brandId, mentions, totalRuns);
-            return [
-              b.brandId,
-              {
-                name: b.name,
-                mentionCount: stats.mentionCount,
-                visibilityRate: stats.visibilityRate,
-                avgRank: stats.avgRank,
-              },
-            ];
-          })
-        )
-      : null;
+  // 경쟁사 특징 추출 2단계 (2026-09-03): 타겟 브랜드와 완전히 같은 함수
+  // (attemptKeywordExtraction)를 경쟁사 이름으로 재호출한다. 언급이 없었던
+  // (mentionCount=0) 경쟁사는 시도 자체를 안 한다 — 타겟 브랜드 규칙 F와 동일.
+  let competitorData: AggregatedMetricToSave['competitorData'] = null;
+
+  if (otherBrands.length > 0) {
+    competitorData = {};
+    for (const b of otherBrands) {
+      const stats = computeBrandStats(b.brandId, mentions, totalRuns);
+
+      let compTopKeywords: TopKeyword[] | null = null;
+      let compStatus: 'success' | 'failed' | null = null;
+
+      if (stats.mentionCount > 0) {
+        const kwResult = await attemptKeywordExtraction({
+          queryId: params.queryId,
+          engine: params.engine,
+          periodStart,
+          periodEnd,
+          targetBrandName: b.name,
+          knownBrands: allKnownBrands,
+        });
+        compTopKeywords = kwResult.topKeywords;
+        compStatus = kwResult.status;
+      }
+
+      competitorData[b.brandId] = {
+        name: b.name,
+        mentionCount: stats.mentionCount,
+        visibilityRate: stats.visibilityRate,
+        avgRank: stats.avgRank,
+        topKeywords: compTopKeywords,
+        keywordExtractionStatus: compStatus,
+      };
+    }
+  }
 
   let topKeywords: TopKeyword[] | null = null;
   let keywordExtractionStatus: 'success' | 'failed' | null = null;
@@ -545,6 +566,8 @@ export interface DailyAggregationSummary {
   failed: number;        // 저장 시도했는데 DB 에러로 실패한 개수
   keywordRetryAttempted: number;   // ← 추가: 오늘 재시도 시도한 실패건 개수
   keywordRetryRecovered: number;   // ← 추가: 그중 재시도로 성공한 개수
+  competitorKeywordRetryAttempted: number; // 경쟁사 확장(2026-09-03): 재시도 시도한 (행,경쟁사) 개수
+  competitorKeywordRetryRecovered: number; // 그중 재시도로 성공한 개수
 }
 
 /**
@@ -582,6 +605,150 @@ export async function retryFailedKeywordExtractions(): Promise<{
 }
 
 /**
+ * competitor_data 안에 keywordExtractionStatus='failed'로 남은 경쟁사 항목을
+ * 다시 시도한다 (경쟁사 확장, 2026-09-03). retryFailedKeywordExtractions와
+ * 목적은 같지만, 실패 단위가 "행 하나"가 아니라 "행 안의 경쟁사 항목 하나"라서
+ * 별도 함수로 뒀다 — 행 하나에 경쟁사 여러 명이 동시에 실패해 있을 수 있고,
+ * 그 경우 한 행에 두 번 이상 DB write를 하지 않도록 행 단위로 모아서 처리한다.
+ */
+export async function retryFailedCompetitorKeywordExtractions(): Promise<{
+  attempted: number;
+  recovered: number;
+}> {
+  const rows = await fetchDailyRowsWithCompetitorData();
+  const knownBrands = await fetchKnownBrands();
+
+  let attempted = 0;
+  let recovered = 0;
+
+  for (const row of rows) {
+    if (!row.competitorData) continue;
+
+    const failedBrandIds = Object.entries(row.competitorData)
+      .filter(([, v]) => v.keywordExtractionStatus === 'failed')
+      .map(([brandId]) => brandId);
+
+    if (failedBrandIds.length === 0) continue;
+
+    const updated = { ...row.competitorData };
+
+    for (const brandId of failedBrandIds) {
+      const entry = updated[brandId];
+      attempted++;
+
+      const result = await attemptKeywordExtraction({
+        queryId: row.queryId,
+        engine: row.engine,
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+        targetBrandName: entry.name,
+        knownBrands,
+      });
+
+      updated[brandId] = {
+        ...entry,
+        topKeywords: result.topKeywords,
+        keywordExtractionStatus: result.status,
+      };
+      if (result.status === 'success') recovered++;
+    }
+
+    await updateCompetitorData(row.id, updated);
+  }
+
+  return { attempted, recovered };
+}
+
+/**
+ * 일회성 백필 (경쟁사 확장, 2026-09-03). 이 기능이 생기기 전에 이미 저장된
+ * daily 행들의 competitor_data에는 topKeywords/keywordExtractionStatus 필드
+ * 자체가 없다(undefined) — aggregateAllQueriesForDay를 과거 날짜로 다시
+ * 돌리면 타겟 브랜드 키워드까지 전부 재호출돼서 이미 검증된 387건에 불필요한
+ * LLM 비용과 덮어쓰기 위험이 생기므로, 이 함수는 competitor_data 필드만
+ * 딱 채운다 — 나머지(mention_count·avg_rank 등)는 절대 건드리지 않는다.
+ *
+ * app/api/backfill-competitor-keywords에서 한 번 수동으로 실행하는 용도.
+ *
+ * maxCalls: 한 번의 서버리스 요청(maxDuration=800초) 안에서 LLM 호출을 몇 개까지
+ * 할지 상한을 둔다. 전체 대상이 최대 738건(스파이크 때 실측)이라 호출당
+ * 1~3초만 걸려도 최악의 경우 800초를 넘을 수 있다. 이 함수는 진행 중에도
+ * 행 단위로 즉시 저장하고(줄 721 updateCompetitorData) "topKeywords가
+ * undefined인 것만" 다시 골라내는 방식이라 — 상한에 걸려 중간에 끊겨도
+ * 데이터 유실 없이 그냥 다시 호출하면 남은 것부터 이어서 처리된다.
+ */
+export async function backfillCompetitorKeywords(maxCalls = 150): Promise<{
+  rowsScanned: number;
+  rowsUpdated: number;
+  callsAttempted: number;
+  callsFailed: number;
+  remaining: number; // 이번 호출에서 상한 때문에 못 건드린 (행,경쟁사) 개수 — 0이 아니면 다시 호출 필요
+}> {
+  const rows = await fetchDailyRowsWithCompetitorData();
+  const knownBrands = await fetchKnownBrands();
+
+  let rowsUpdated = 0;
+  let callsAttempted = 0;
+  let callsFailed = 0;
+  let remaining = 0;
+
+  for (const row of rows) {
+    if (!row.competitorData) continue;
+
+    // 아직 이 확장을 한 번도 안 거친 경쟁사 항목만 고른다: topKeywords가
+    // undefined(키 자체가 없음)인 경우만 — null은 "이미 시도했는데 언급 없어서
+    // 건너뛴" 정상 상태이므로 다시 건드리면 안 된다.
+    const untouchedBrandIds = Object.entries(row.competitorData)
+      .filter(([, v]) => v.topKeywords === undefined && v.mentionCount > 0)
+      .map(([brandId]) => brandId);
+
+    if (untouchedBrandIds.length === 0) continue;
+
+    if (callsAttempted >= maxCalls) {
+      remaining += untouchedBrandIds.length;
+      continue;
+    }
+
+    const updated = { ...row.competitorData };
+    let rowTouched = false;
+
+    for (const brandId of untouchedBrandIds) {
+      if (callsAttempted >= maxCalls) {
+        remaining++;
+        continue;
+      }
+
+      const entry = updated[brandId];
+      callsAttempted++;
+      rowTouched = true;
+
+      const result = await attemptKeywordExtraction({
+        queryId: row.queryId,
+        engine: row.engine,
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+        targetBrandName: entry.name,
+        knownBrands,
+      });
+
+      if (result.status === 'failed') callsFailed++;
+
+      updated[brandId] = {
+        ...entry,
+        topKeywords: result.topKeywords,
+        keywordExtractionStatus: result.status,
+      };
+    }
+
+    if (rowTouched) {
+      const ok = await updateCompetitorData(row.id, updated);
+      if (ok) rowsUpdated++;
+    }
+  }
+
+  return { rowsScanned: rows.length, rowsUpdated, callsAttempted, callsFailed, remaining };
+}
+
+/**
  * 특정 KST 날짜에 대해, 활성 쿼리 × 전체 엔진(6개) 조합을 전부 집계해서
  * aggregated_metrics에 daily 레벨로 저장한다.
  *
@@ -599,20 +766,22 @@ export async function retryFailedKeywordExtractions(): Promise<{
  */
 export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyAggregationSummary> {
   const keywordRetryResult = await retryFailedKeywordExtractions();
+  const competitorKeywordRetryResult = await retryFailedCompetitorKeywordExtractions();
   const { periodStart, periodEnd } = kstDayBoundsUtc(dateKST);
 
   const queries = await fetchActiveQueries();
   const knownBrands = await fetchKnownBrands();
 
-  const summary: DailyAggregationSummary = { 
-    dateKST, 
-    attempted: 0, 
-    saved: 0, 
-    skipped: 0, 
-    failed: 0, 
+  const summary: DailyAggregationSummary = {
+    dateKST,
+    attempted: 0,
+    saved: 0,
+    skipped: 0,
+    failed: 0,
     keywordRetryAttempted: keywordRetryResult.attempted,   // ← 추가
     keywordRetryRecovered: keywordRetryResult.recovered,   // ← 추가
-  
+    competitorKeywordRetryAttempted: competitorKeywordRetryResult.attempted,
+    competitorKeywordRetryRecovered: competitorKeywordRetryResult.recovered,
   };
 
   // brand_facts는 브랜드당 값이 하나뿐이라(쿼리마다 안 바뀜) 이 함수 실행

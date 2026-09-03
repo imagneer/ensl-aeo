@@ -835,7 +835,22 @@ export interface AggregatedMetricToSave {
   visibilityRate: number | null;
   avgRank: number | null;
   rankStddev: number | null;
-  competitorData: Record<string, { name: string; mentionCount: number; visibilityRate: number | null; avgRank: number | null }> | null;
+  /**
+   * 경쟁사별 노출 키워드 확장 (2026-09-03, "경쟁사 특징 추출" 부채 2단계).
+   * topKeywords/keywordExtractionStatus는 그 경쟁사가 이 기간에 mentionCount>0일
+   * 때만 채워진다 — 타겟 브랜드의 top_keywords 컬럼과 완전히 같은 규칙(null=시도
+   * 안 함, []=시도했는데 표현 없음, [...] =실제 표현). 필드 자체가 없는(undefined)
+   * 경우는 "이 확장 이전에 저장된 옛날 행" — false와 구분해야 backfill 대상을
+   * 정확히 골라낼 수 있다.
+   */
+  competitorData: Record<string, {
+    name: string;
+    mentionCount: number;
+    visibilityRate: number | null;
+    avgRank: number | null;
+    topKeywords?: { keyword: string; count: number }[] | null;
+    keywordExtractionStatus?: 'success' | 'failed' | null;
+  }> | null;
   failedCount: number;
   skippedCount: number;
     /**
@@ -980,6 +995,72 @@ export async function updateKeywordExtractionResult(
 
   return true;
 }
+
+// ── 경쟁사 키워드 확장 (2026-09-03) ──
+
+export interface DailyRowWithCompetitorData {
+  id: string;
+  queryId: string;
+  engine: string;
+  periodStart: string;
+  periodEnd: string;
+  competitorData: AggregatedMetricToSave['competitorData'];
+}
+
+/**
+ * competitor_data가 있는 daily 행을 전부 가져온다. status 컬럼(타겟 브랜드용
+ * keyword_extraction_status)과 달리 "실패한 경쟁사만" 조건을 DB 쿼리로 못 건다 —
+ * jsonb 안 여러 경쟁사 항목 중 하나라도 failed인 행을 고르려면 Postgres 쪽
+ * jsonb 연산자가 필요한데, 지금 데이터 규모(수백 행)에서는 전부 읽어서
+ * 코드에서 거르는 쪽이 훨씬 간단하고 성능 차이도 무시할 만하다.
+ */
+export async function fetchDailyRowsWithCompetitorData(): Promise<DailyRowWithCompetitorData[]> {
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('id, query_id, engine, period_start, period_end, competitor_data')
+    .eq('aggregation_level', 'daily')
+    .not('competitor_data', 'is', null);
+
+  if (error) {
+    console.error('competitor_data 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    queryId: row.query_id,
+    engine: row.engine,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    competitorData: row.competitor_data,
+  }));
+}
+
+/**
+ * competitor_data 컬럼 전체를 통째로 덮어쓴다. 타겟 브랜드용
+ * updateKeywordExtractionResult와 같은 이유로 saveAggregatedMetric(upsert)을
+ * 재사용하지 않는다 — 노출률 등 이미 확정된 값을 안 건드리고 이 컬럼 하나만 고친다.
+ * 호출부가 기존 competitor_data를 읽어서 필요한 경쟁사 항목만 고친 다음
+ * "합쳐진 전체 객체"를 넘겨야 한다 — 이 함수 자체는 병합을 하지 않는다.
+ */
+export async function updateCompetitorData(
+  id: string,
+  competitorData: AggregatedMetricToSave['competitorData']
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .update({ competitor_data: competitorData })
+    .eq('id', id);
+
+  if (error) {
+    console.error('competitor_data 업데이트 실패:', error);
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * is_target=true인 브랜드 목록을 이름순으로 가져온다.
  *
@@ -2171,5 +2252,122 @@ export async function fetchQuerySnapshotsWithMentions(
     searchPerformed: s.search_performed,
     rawResponse: s.raw_response,
     mentions: mentionsBySnapshot.get(s.id) ?? [],
+  }));
+}
+
+// ── 브랜드 현 위치 화면 (Day21, /brand-position) ──
+
+/**
+ * fetchQuerySnapshotsWithMentions을 자리 질문 9개에 대해 하나씩(N번) 부르지
+ * 않고, snapshots·mentions 조회를 각각 딱 1번씩만 해서 질문별로 묶어 돌려준다.
+ * "무엇을 근거로 판단했을까?"(fetchQuestionEvidenceSummary)와 같은 배치 조회
+ * 패턴이다 — 다른 점은 이쪽은 요약이 아니라 mentions까지 포함한 원본 레코드를
+ * 그대로 돌려줘서, 호출부가 lib/query-detail.ts의 계산 함수들
+ * (computeAppearanceHeaderStats/computeCompetitorBrands 등)을 질문상세
+ * 화면과 완전히 동일한 정의로 재사용할 수 있게 한다 — "화면 간 관측 횟수
+ * 공식이 어긋나면 안 된다"는 원칙(CLAUDE.md 알려진 정합성 이슈 2번)을
+ * 지키기 위한 선택.
+ */
+export async function fetchQuerySnapshotsWithMentionsBatch(
+  queryIds: string[],
+  periodStart: string,
+  periodEnd: string,
+  client: SupabaseClient
+): Promise<Map<string, QuerySnapshotRecord[]>> {
+  const result = new Map<string, QuerySnapshotRecord[]>(queryIds.map((id) => [id, []]));
+  if (queryIds.length === 0) return result;
+
+  const { data: snapshotRows, error: snapshotError } = await client
+    .from('snapshots')
+    .select('id, query_id, engine, executed_at, status, search_performed, raw_response')
+    .in('query_id', queryIds)
+    .gte('executed_at', periodStart)
+    .lt('executed_at', periodEnd)
+    .order('executed_at', { ascending: false });
+
+  if (snapshotError) {
+    console.error('브랜드 현 위치용 snapshots 배치 조회 실패:', snapshotError);
+    return result;
+  }
+  if (!snapshotRows || snapshotRows.length === 0) return result;
+
+  const snapshotIds = snapshotRows.map((s) => s.id);
+  const { data: mentionRows, error: mentionError } = await client
+    .from('mentions')
+    .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains')
+    .in('snapshot_id', snapshotIds);
+
+  if (mentionError) {
+    console.error('브랜드 현 위치용 mentions 배치 조회 실패:', mentionError);
+  }
+
+  const mentionsBySnapshot = new Map<string, QuerySnapshotMention[]>();
+  for (const m of mentionRows ?? []) {
+    if (!mentionsBySnapshot.has(m.snapshot_id)) mentionsBySnapshot.set(m.snapshot_id, []);
+    mentionsBySnapshot.get(m.snapshot_id)!.push({
+      brandId: m.brand_id,
+      brandNameRaw: m.brand_name_raw,
+      isTarget: m.is_target,
+      sourceUrls: m.source_urls ?? [],
+      sourceDomains: m.source_domains ?? [],
+    });
+  }
+
+  for (const s of snapshotRows) {
+    const record: QuerySnapshotRecord = {
+      id: s.id,
+      engine: s.engine,
+      executedAt: s.executed_at,
+      status: s.status,
+      searchPerformed: s.search_performed,
+      rawResponse: s.raw_response,
+      mentions: mentionsBySnapshot.get(s.id) ?? [],
+    };
+    result.get(s.query_id)?.push(record);
+  }
+
+  return result;
+}
+
+export interface AggregatedKeywordRow {
+  queryId: string;
+  /** 타겟 브랜드(그 질문의 queries.brand_id)의 그 날짜 top_keywords. */
+  topKeywords: { keyword: string; count: number }[] | null;
+  /** 그 날짜의 competitor_data 전체(jsonb) — 경쟁사별 topKeywords가 이 안에 있다. */
+  competitorData: AggregatedMetricToSave['competitorData'];
+}
+
+/**
+ * 진단 기간(여러 날짜 × 6엔진) 동안 쌓인 daily 집계 행을 질문 여러 개에 대해
+ * 한 번에 가져온다. 브랜드 현 위치 화면이 "이 질문에서 우리는 뭐라고
+ * 설명됐고, 가장 강한 경쟁사는 뭐라고 설명됐나"를 진단 기간 전체 기준으로
+ * 보여주려면, 하루짜리 top_keywords/competitor_data를 여러 날짜·엔진에
+ * 걸쳐 합쳐야 한다(호출부의 combineTopKeywords가 담당) — 이 함수는 합치기
+ * 전 원본 행만 그대로 돌려준다.
+ */
+export async function fetchAggregatedKeywordRowsForQueries(
+  queryIds: string[],
+  periodStart: string,
+  periodEnd: string
+): Promise<AggregatedKeywordRow[]> {
+  if (queryIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('query_id, top_keywords, competitor_data')
+    .in('query_id', queryIds)
+    .eq('aggregation_level', 'daily')
+    .gte('period_start', periodStart)
+    .lt('period_start', periodEnd);
+
+  if (error) {
+    console.error('브랜드 현 위치용 키워드 배치 조회 실패:', error);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    queryId: row.query_id,
+    topKeywords: row.top_keywords,
+    competitorData: row.competitor_data,
   }));
 }
