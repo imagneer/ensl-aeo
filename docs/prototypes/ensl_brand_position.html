@@ -94,7 +94,6 @@
   .qitem:last-child { border-bottom: 0.5px solid var(--border); }
   .qhead { padding: 16px 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; border-top: 0.5px solid var(--border); }
   .qhead .qtext { font-size: 15px; font-weight: 500; margin: 0 0 6px; }
-  .qhead .aux { font-size: 11px; font-weight: 400; color: var(--text-muted); }
   .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 10px; border-radius: 20px; }
   .badge.strong { background: var(--bg-success); color: var(--text-success); }
   .badge.sometimes { background: var(--border); border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
@@ -203,7 +202,7 @@
 
         <div class="competition">
           <p class="title">이 자리에서 함께 등장한 브랜드</p>
-          <p class="caption">AI가 함께 언급한 특징 · <em>합성 데이터로 검증됨, 실제 데이터 검증 예정</em></p>
+          <p class="caption">AI가 함께 언급한 특징 · <em>AI가 실제로 쓴 표현이에요 · 짧은 핵심어로 다듬는 작업은 진행 중이라, 문장 그대로 나올 수 있어요</em></p>
           <div class="brand-list">
             <div class="brand-row"><div><p class="nm">365서울원탑치과 <span class="ours">(우리)</span></p><p class="ft">고난도 임플란트 · 전문의 협진</p></div><p class="pc">75%</p></div>
             <div class="brand-row"><div><p class="nm">강서○○치과</p><p class="ft">지역 접근성 · 야간 진료</p></div><p class="pc sec">62%</p></div>
@@ -338,21 +337,21 @@
 
         <div class="qitem">
           <div class="qhead" onclick="tgl(this)">
-            <div style="flex:1; min-width:0;"><p class="qtext">강서구에서 야간 진료하는 치과는? <span class="aux">(보조 질문)</span></p><span class="badge insufficient">판단할 데이터가 부족함</span></div>
+            <div style="flex:1; min-width:0;"><p class="qtext">강서구에서 야간 진료하는 치과는?</p><span class="badge insufficient">판단할 데이터가 부족함</span></div>
             <div class="row-tail"><div class="stat-col"><p class="pct muted">—</p><p class="frac">6회 중 기준 미달</p></div><span class="chev">▾</span></div>
           </div>
           <div class="qdetail">
-            <p class="note">보조 질문은 하루 1회만 관측돼서, 판단을 내리려면 아직 더 쌓여야 해요. 최소 기준을 채우면 다른 질문처럼 상태가 표시돼요.</p>
+            <p class="note">이 질문은 아직 관측이 부족해서 판단하기 일러요. 최소 기준(10회)이 쌓이면 다른 질문처럼 상태가 표시돼요.</p>
           </div>
         </div>
 
         <div class="qitem">
           <div class="qhead" onclick="tgl(this)">
-            <div style="flex:1; min-width:0;"><p class="qtext">당일 임플란트 가능한 치과 있어? <span class="aux">(보조 질문)</span></p><span class="badge insufficient">판단할 데이터가 부족함</span></div>
+            <div style="flex:1; min-width:0;"><p class="qtext">당일 임플란트 가능한 치과 있어?</p><span class="badge insufficient">판단할 데이터가 부족함</span></div>
             <div class="row-tail"><div class="stat-col"><p class="pct muted">—</p><p class="frac">4회 중 기준 미달</p></div><span class="chev">▾</span></div>
           </div>
           <div class="qdetail">
-            <p class="note">보조 질문은 하루 1회만 관측돼서, 판단을 내리려면 아직 더 쌓여야 해요.</p>
+            <p class="note">이 질문은 아직 관측이 부족해서 판단하기 일러요. 최소 기준(10회)이 쌓이면 다른 질문처럼 상태가 표시돼요.</p>
           </div>
         </div>
 

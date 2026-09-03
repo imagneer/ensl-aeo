@@ -477,4 +477,65 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .ci-conflict-pair { font-size: 11.5px; line-height: 1.7; margin: 0; }
 .ci-conflict-pair .who { color: var(--text-secondary); }
 .ci-conflict-pair .say { color: var(--text-primary); font-weight: 500; }
+
+/* ── 브랜드 현 위치 화면 — Day 21 ──
+   디자인 원본: docs/prototypes/ensl_brand_position.html. 원본은 <div
+   onclick>로 펼치기/접기를 구현했지만(정적 HTML이라 JS 필요), 실제
+   화면은 서버 컴포넌트라 <details>/<summary> 네이티브 엘리먼트로
+   대체한다 — 클라이언트 JS 없이 브라우저 기본 동작만으로 접고 펼치기가
+   되고, 접근성도 기본으로 따라온다(코난 판단). 나머지 클래스명은 원본을
+   그대로 따른다. */
+.badge.sometimes { background: var(--border); border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
+.badge.none { border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
+.badge.insufficient { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); }
+
+.hero { background: var(--surface-1); border-radius: 12px; padding: 2rem; margin-bottom: 32px; }
+.hero .sub-label { font-size: 13px; color: var(--text-secondary); margin: 0 0 10px; }
+.hero .question { font-size: 26px; font-weight: 500; line-height: 1.5; margin: 0 0 16px; }
+.rate-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-success); color: var(--text-success); font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 20px; }
+.competition { border-top: 0.5px solid var(--border-strong); padding-top: 20px; margin-top: 24px; }
+.competition .title { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+.competition .caption { font-size: 11px; color: var(--text-muted); margin: 0 0 14px; }
+.competition .caption em { font-style: italic; }
+
+.brand-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.brand-list-sm { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+/* .brand-row의 기본 배경(--surface-1)이 .hero 배경과 완전히 같은 색이라
+   여기 안에서는 카드가 안 보이고 그냥 평평하게 붙어버린다(2026-09-03,
+   루아 스크린샷으로 발견). 프로토타입 원안대로 --surface-2(흰색)로
+   덮어써서 .hero 위에 카드가 뜨게 만든다 — 이 셀렉터 밖(질문상세 화면 등,
+   흰 배경 위에서 쓰는 곳)은 그대로 --surface-1을 유지해야 하므로 전역
+   .brand-row는 안 건드리고 .competition 안에서만 덮어쓴다. */
+.competition .brand-row { background: var(--surface-2); }
+
+.interpretation { background: var(--surface-2); border-radius: var(--radius); padding: 16px; }
+.interpretation .k { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+.interpretation .v { font-size: 14px; line-height: 1.6; margin: 0; }
+
+/* 히어로 "이 자리의 실제 근거 보기 →" 토글 — <details><summary>이라 기본
+   button 스타일이 안 먹어서 .app-shell button과 같은 모양을 직접 준다. */
+.evidence-toggle { font-size: 13px; margin-top: 14px; display: inline-flex; cursor: pointer; border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 6px 12px; list-style: none; }
+.evidence-toggle::-webkit-details-marker { display: none; }
+.evidence-toggle:hover { background: var(--surface-1); }
+/* evidence-box 안 "전체 답변과 출처 보기" 링크 — .expand-btn(버튼 모양)에
+   너비만 꽉 채워서 프로토타입의 evidence-box button과 같은 자리를 준다. */
+.evidence-box .evidence-cta { display: block; width: 100%; text-align: center; font-size: 12px; }
+
+.qlist { display: flex; flex-direction: column; }
+.qitem { border-top: 0.5px solid var(--border); }
+.qitem:last-child { border-bottom: 0.5px solid var(--border); }
+.qhead { padding: 16px 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; list-style: none; }
+.qhead::-webkit-details-marker { display: none; }
+.qhead .qtext { font-size: 15px; font-weight: 500; margin: 0 0 6px; }
+.row-tail { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.stat-col { width: 84px; flex-shrink: 0; text-align: right; }
+.stat-col .pct { font-size: 24px; font-weight: 500; margin: 0; line-height: 1; }
+.stat-col .pct.muted { color: var(--text-muted); }
+.stat-col .frac { font-size: 11px; color: var(--text-muted); margin: 2px 0 0; }
+.chev { font-size: 14px; color: var(--text-muted); transition: transform 0.15s; }
+.qitem[open] .chev { transform: rotate(180deg); }
+
+.qdetail { padding: 0 4px 20px; }
+.qdetail .lbl { font-size: 12px; color: var(--text-muted); margin: 0 0 4px; }
+.qdetail .cap { font-size: 11px; color: var(--text-muted); font-style: italic; margin: 0 0 10px; }
 .ci-conflict-vs { text-align: center; font-size: 10px; color: var(--text-warning); margin: 2px 0; }
