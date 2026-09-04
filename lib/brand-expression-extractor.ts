@@ -21,6 +21,7 @@
 
 import { buildBrandParagraphs, type BrandParagraph } from './keyword-extractor';
 import { ANTHROPIC_API_URL, ANTHROPIC_MODEL, ANTHROPIC_VERSION } from './llm-config';
+import { logLlmCallSuccess, logLlmCallFailure, type LlmRunKind } from './llm-usage';
 
 export { buildBrandParagraphs, type BrandParagraph };
 
@@ -97,7 +98,8 @@ ${numberedParagraphs}`;
 export async function extractBrandExpressionsDetailed(
   brandName: string,
   paragraphs: BrandParagraph[],
-  brandFacts: string | null
+  brandFacts: string | null,
+  usageContext?: { brandId?: string | null; queryId?: string | null; engine?: string | null; runKind?: LlmRunKind }
 ): Promise<ParagraphExpressions[]> {
   if (paragraphs.length === 0) return [];
 
@@ -105,6 +107,17 @@ export async function extractBrandExpressionsDetailed(
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
   }
+
+  const logCtx = {
+    site: 'brand-expression-extractor',
+    model: ANTHROPIC_MODEL,
+    kind: 'expression' as const,
+    runKind: usageContext?.runKind ?? ('cron' as LlmRunKind),
+    brandName,
+    brandId: usageContext?.brandId ?? null,
+    queryId: usageContext?.queryId ?? null,
+    engine: usageContext?.engine ?? null,
+  };
 
   const prompt = buildExtractionPrompt(brandName, paragraphs, brandFacts);
 
@@ -162,10 +175,12 @@ export async function extractBrandExpressionsDetailed(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logLlmCallFailure(logCtx, response.status, errorBody);
     throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
   }
 
   const data = await response.json();
+  if (data.usage) logLlmCallSuccess(logCtx, data.usage);
   const blocks: { type: string; input?: unknown }[] = data.content ?? [];
 
   const toolUseBlock = blocks.find((b) => b.type === 'tool_use');

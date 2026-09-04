@@ -88,6 +88,12 @@ import {
 import { retryWithBackoff, isRetryableLLMError } from './retry';
 
 import { ENGINE_NAMES, type EngineName } from './engine-config';
+import { startUsageRun, getUsageRunSummary, type LlmCallKind, type LlmRunKind } from './llm-usage';
+import {
+  MAX_LLM_CALLS_PER_RUN,
+  ESTIMATED_TOKENS_PER_KEYWORD_CALL,
+  HAIKU_PRICE_PER_MILLION_TOKENS,
+} from './llm-config';
 
 // ── 통계 헬퍼 ──
 
@@ -210,6 +216,10 @@ async function attemptKeywordExtraction(params: {
   periodEnd: string;
   targetBrandName: string;
   knownBrands: KnownBrand[];
+  /** usage 로깅용(2026-09-04 예산 사고 후속) — 타겟 자신용인지 경쟁사용인지, 재시도 큐를 통해서인지. */
+  brandId?: string | null;
+  usageKind?: LlmCallKind;
+  usageRunKind?: LlmRunKind;
 }): Promise<KeywordExtractionResult> {
   try {
     const rawSnapshots = await fetchSnapshotsForKeywordExtraction({
@@ -245,7 +255,14 @@ async function attemptKeywordExtraction(params: {
     }
 
     const results = await retryWithBackoff(
-      () => extractExpressionsFromParagraphs(params.targetBrandName, paragraphs),
+      () =>
+        extractExpressionsFromParagraphs(params.targetBrandName, paragraphs, {
+          kind: params.usageKind ?? 'target',
+          runKind: params.usageRunKind ?? 'cron',
+          brandId: params.brandId,
+          queryId: params.queryId,
+          engine: params.engine,
+        }),
       3,
       isRetryableLLMError
     );
@@ -311,7 +328,13 @@ async function attemptBrandExpressionExtraction(params: {
     if (paragraphs.length === 0) return;
 
     const results = await retryWithBackoff(
-      () => extractBrandExpressionsDetailed(params.targetBrandName, paragraphs, params.brandFacts),
+      () =>
+        extractBrandExpressionsDetailed(params.targetBrandName, paragraphs, params.brandFacts, {
+          brandId: params.targetBrandId,
+          queryId: params.queryId,
+          engine: params.engine,
+          runKind: 'cron',
+        }),
       3,
       isRetryableLLMError
     );
@@ -448,6 +471,8 @@ export async function aggregateOne(
           periodEnd,
           targetBrandName: b.name,
           knownBrands: allKnownBrands,
+          brandId: b.brandId,
+          usageKind: 'competitor',
         });
         compTopKeywords = kwResult.topKeywords;
         compStatus = kwResult.status;
@@ -477,6 +502,8 @@ export async function aggregateOne(
         periodEnd,
         targetBrandName: targetBrand.name,
         knownBrands: allKnownBrands,
+        brandId: params.targetBrandId,
+        usageKind: 'target',
       });
       topKeywords = kwResult.topKeywords;
       keywordExtractionStatus = kwResult.status;
@@ -568,6 +595,18 @@ export interface DailyAggregationSummary {
   keywordRetryRecovered: number;   // ← 추가: 그중 재시도로 성공한 개수
   competitorKeywordRetryAttempted: number; // 경쟁사 확장(2026-09-03): 재시도 시도한 (행,경쟁사) 개수
   competitorKeywordRetryRecovered: number; // 그중 재시도로 성공한 개수
+
+  // 2026-09-04, 예산 사고 후속 안전장치 "작업 2" — 이 실행 1회가 LLM을
+  // 몇 번, 어떤 종류로, 얼마나(토큰) 불렀는지. Vercel 로그에서 크론 1회
+  // 실행 끝에 한 줄로 볼 수 있어야 "오늘 몇 번 불렀는지"를 매번 로그를
+  // grep해서 세지 않아도 된다.
+  llmCalls: number;
+  llmCallsByKind: Partial<Record<LlmCallKind, number>>;
+  llmInputTokens: number;
+  llmOutputTokens: number;
+  llmFailedCalls: number;
+  /** MAX_LLM_CALLS_PER_RUN(lib/llm-config.ts)에 걸려 중간에 멈췄으면 true — 정상 종료가 아니라는 신호. */
+  stoppedByLlmCallCap: boolean;
 }
 
 /**
@@ -595,6 +634,9 @@ export async function retryFailedKeywordExtractions(): Promise<{
       periodEnd: row.periodEnd,
       targetBrandName: brand.name,
       knownBrands,
+      brandId: row.brandId,
+      usageKind: 'retry',
+      usageRunKind: 'retry',
     });
 
     await updateKeywordExtractionResult(row.id, result.topKeywords, result.status);
@@ -643,6 +685,9 @@ export async function retryFailedCompetitorKeywordExtractions(): Promise<{
         periodEnd: row.periodEnd,
         targetBrandName: entry.name,
         knownBrands,
+        brandId,
+        usageKind: 'retry',
+        usageRunKind: 'retry',
       });
 
       updated[brandId] = {
@@ -676,13 +721,29 @@ export async function retryFailedCompetitorKeywordExtractions(): Promise<{
  * undefined인 것만" 다시 골라내는 방식이라 — 상한에 걸려 중간에 끊겨도
  * 데이터 유실 없이 그냥 다시 호출하면 남은 것부터 이어서 처리된다.
  */
-export async function backfillCompetitorKeywords(maxCalls = 150): Promise<{
+export interface BackfillCompetitorKeywordsResult {
+  httpCalls: 1; // 이 함수를 부른 HTTP 요청은 항상 1건 — llmCalls와 대비해서 보여주기 위한 상수 필드
+  llmCalls: number; // = callsAttempted, "HTTP 1회 뒤에 150회가 숨는 구조"를 응답에서 바로 보이게 함
   rowsScanned: number;
   rowsUpdated: number;
   callsAttempted: number;
   callsFailed: number;
   remaining: number; // 이번 호출에서 상한 때문에 못 건드린 (행,경쟁사) 개수 — 0이 아니면 다시 호출 필요
-}> {
+  dryRun: boolean;
+  estimatedInputTokens?: number;
+  estimatedOutputTokens?: number;
+  estimatedCostUsd?: number;
+}
+
+/**
+ * @param dryRun true면 LLM을 실제로 호출하지 않고, 이번에 처리될 예정인
+ *   건수만 세서 lib/llm-config.ts의 대략치로 예상 토큰·비용을 돌려준다
+ *   (작업지시서 "작업 3" — 대량 호출 전에 규모를 먼저 보게 한다).
+ */
+export async function backfillCompetitorKeywords(
+  maxCalls = 150,
+  dryRun = false
+): Promise<BackfillCompetitorKeywordsResult> {
   const rows = await fetchDailyRowsWithCompetitorData();
   const knownBrands = await fetchKnownBrands();
 
@@ -702,6 +763,16 @@ export async function backfillCompetitorKeywords(maxCalls = 150): Promise<{
       .map(([brandId]) => brandId);
 
     if (untouchedBrandIds.length === 0) continue;
+
+    if (dryRun) {
+      // dry-run은 실행 순서를 흉내낼 필요 없이 "처리 대상 총량"만 알면 된다 —
+      // maxCalls 상한도 그대로 반영해서, 실제 실행했을 때 몇 번 더 호출해야
+      // 하는지(remaining)까지 미리 보여준다.
+      const withinCap = Math.max(0, maxCalls - callsAttempted);
+      callsAttempted += Math.min(withinCap, untouchedBrandIds.length);
+      remaining += Math.max(0, untouchedBrandIds.length - withinCap);
+      continue;
+    }
 
     if (callsAttempted >= maxCalls) {
       remaining += untouchedBrandIds.length;
@@ -728,6 +799,9 @@ export async function backfillCompetitorKeywords(maxCalls = 150): Promise<{
         periodEnd: row.periodEnd,
         targetBrandName: entry.name,
         knownBrands,
+        brandId,
+        usageKind: 'competitor',
+        usageRunKind: 'backfill',
       });
 
       if (result.status === 'failed') callsFailed++;
@@ -745,7 +819,27 @@ export async function backfillCompetitorKeywords(maxCalls = 150): Promise<{
     }
   }
 
-  return { rowsScanned: rows.length, rowsUpdated, callsAttempted, callsFailed, remaining };
+  const base = { rowsScanned: rows.length, rowsUpdated, callsAttempted, callsFailed, remaining };
+
+  if (dryRun) {
+    const estimatedInputTokens = callsAttempted * ESTIMATED_TOKENS_PER_KEYWORD_CALL.input;
+    const estimatedOutputTokens = callsAttempted * ESTIMATED_TOKENS_PER_KEYWORD_CALL.output;
+    const estimatedCostUsd =
+      (estimatedInputTokens * HAIKU_PRICE_PER_MILLION_TOKENS.input +
+        estimatedOutputTokens * HAIKU_PRICE_PER_MILLION_TOKENS.output) /
+      1_000_000;
+    return {
+      httpCalls: 1,
+      llmCalls: 0, // dry-run은 실제로 0번 호출함 — callsAttempted는 "호출 예정" 건수
+      ...base,
+      dryRun: true,
+      estimatedInputTokens,
+      estimatedOutputTokens,
+      estimatedCostUsd: Math.round(estimatedCostUsd * 10000) / 10000,
+    };
+  }
+
+  return { httpCalls: 1, llmCalls: callsAttempted, ...base, dryRun: false };
 }
 
 /**
@@ -765,6 +859,11 @@ export async function backfillCompetitorKeywords(maxCalls = 150): Promise<{
  *   30건 이내)에서는 순차 처리 속도 손해가 무시할 만하다.
  */
 export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyAggregationSummary> {
+  // 2026-09-04, 예산 사고 후속 "작업 2" — 이 실행 1회의 LLM 호출을 처음부터
+  // (재시도 큐 포함) 끝까지 전부 센다. 재시도도 반드시 여기서 시작한 뒤에
+  // 부를 것 — 안 그러면 재시도분이 이번 실행 집계에서 빠진다.
+  startUsageRun();
+
   const keywordRetryResult = await retryFailedKeywordExtractions();
   const competitorKeywordRetryResult = await retryFailedCompetitorKeywordExtractions();
   const { periodStart, periodEnd } = kstDayBoundsUtc(dateKST);
@@ -782,6 +881,12 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
     keywordRetryRecovered: keywordRetryResult.recovered,   // ← 추가
     competitorKeywordRetryAttempted: competitorKeywordRetryResult.attempted,
     competitorKeywordRetryRecovered: competitorKeywordRetryResult.recovered,
+    llmCalls: 0,
+    llmCallsByKind: {},
+    llmInputTokens: 0,
+    llmOutputTokens: 0,
+    llmFailedCalls: 0,
+    stoppedByLlmCallCap: false,
   };
 
   // brand_facts는 브랜드당 값이 하나뿐이라(쿼리마다 안 바뀜) 이 함수 실행
@@ -794,7 +899,7 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
     return brandFactsCache.get(brandId)!;
   }
 
-  for (const query of queries) {
+  outer: for (const query of queries) {
     const otherBrands = knownBrands
       .filter((b) => b.brandId !== query.brandId)
       .map((b) => ({ brandId: b.brandId, name: b.name }));
@@ -802,6 +907,22 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
     const brandFacts = query.queryType === '인지' ? await getBrandFacts(query.brandId) : null;
 
     for (const engine of ENGINE_NAMES) {
+      // 2026-09-04, "작업 3" 대량 호출 가드 — 재시도 큐 소진분까지 합쳐서
+      // 이번 실행이 상한을 넘겼으면 남은 (쿼리,엔진) 조합은 아예 시도하지
+      // 않고 중단한다. 부분적으로 저장된 행은 그대로 두고(이미 저장된 건
+      // 유효한 데이터), 남은 조합은 다음 크론 실행에서 처리되게 둔다 —
+      // 조용히 넘어가지 않고 stoppedByLlmCallCap=true로 남겨서 로그에서
+      // "정상 종료가 아니었다"는 걸 바로 알 수 있게 한다.
+      if (getUsageRunSummary().llmCalls >= MAX_LLM_CALLS_PER_RUN) {
+        summary.stoppedByLlmCallCap = true;
+        console.error(
+          `⚠️ aggregate-daily가 MAX_LLM_CALLS_PER_RUN(${MAX_LLM_CALLS_PER_RUN})에 걸려 중단됨 — ` +
+            `날짜=${dateKST}, 지금까지 처리=${summary.attempted}건. 정상 규모(하루 최대 288회)를 크게 넘었다는 뜻이라 ` +
+            `버그(예: 재시도 큐 폭주)인지 브랜드/쿼리가 실제로 늘어난 건지 확인이 필요하다.`
+        );
+        break outer;
+      }
+
       summary.attempted++;
 
       const result = await aggregateOne(
@@ -834,6 +955,23 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
       }
     }
   }
+
+  const usage = getUsageRunSummary();
+  summary.llmCalls = usage.llmCalls;
+  summary.llmCallsByKind = usage.llmCallsByKind;
+  summary.llmInputTokens = usage.llmInputTokens;
+  summary.llmOutputTokens = usage.llmOutputTokens;
+  summary.llmFailedCalls = usage.llmFailedCalls;
+
+  console.log('=== aggregate-daily LLM 사용량 요약 ===', {
+    dateKST,
+    llmCalls: summary.llmCalls,
+    llmCallsByKind: summary.llmCallsByKind,
+    llmInputTokens: summary.llmInputTokens,
+    llmOutputTokens: summary.llmOutputTokens,
+    llmFailedCalls: summary.llmFailedCalls,
+    stoppedByLlmCallCap: summary.stoppedByLlmCallCap,
+  });
 
   return summary;
 }

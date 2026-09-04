@@ -410,6 +410,25 @@ CDN은 `/dist/` 경로 필수.
   실제 추출 결과엔 오염 없음 — 단 구조적 안전장치는 아님. 노바 확인 필요,
   9/11 이후
 - 알림 로직 실조건 미검증
+- LLM 호출 usage(토큰) 미기록 — **해결됨(2026-09-04)**. 9/3 Anthropic
+  크레딧 잔액 -$0.04로 API 차단된 사고 조사 중, `lib/keyword-extractor.ts`의
+  `data.usage` 로깅용 `console.log`가 애초에 주석 처리돼 있어서 그 사고의
+  정확한 비용을 사후 복원할 수 없었던 게 드러남(에일 확인). `lib/llm-usage.ts`
+  하나로 ANTHROPIC_API_URL을 fetch하는 7곳(keyword-extractor·
+  brand-expression-extractor·brand-one-liner 5개 함수) 전부의 usage를
+  같은 형식(JSON 한 줄, 성공/실패 둘 다)으로 로깅하게 만들고,
+  `aggregate-daily` 실행 1회당 합계(`llmCalls`/`llmCallsByKind`/토큰)를
+  응답에 노출함. `backfillCompetitorKeywords()`엔 `?dryRun=1` 추정 모드와
+  `MAX_LLM_CALLS_PER_RUN`(400, `lib/llm-config.ts`) 상한을 추가해서 대량
+  호출이 조용히 폭주하지 못하게 막음. ⚠️ 선택 항목이었던 Supabase
+  `llm_calls` 테이블(조회 가능한 이력 저장)은 이번엔 스킵함 — 그래서
+  dry-run의 "예상 토큰"은 실측 평균이 아니라 역산 추정치(대략치)다.
+- Sonnet 5 진단 종료 비용 미예산 (2026-09-04 신규, 에일 확인) —
+  `lib/brand-one-liner.ts`의 브랜드 한 줄 합성(5개 함수, 진단 1회 종료
+  시 딱 한 번 실행)이 Sonnet 5를 쓰는데, 최근 30일 콘솔 비용엔 Haiku만
+  찍혀 있어서 아직 프로덕션에서 한 번도 안 돌았다는 뜻 — 즉 **진단이 처음
+  종료되는 날 예산에 없던 Sonnet 비용이 새로 튄다.** PRD 예산 항목에
+  반영 필요(에일 진행 예정).
 - 경쟁사 특징 추출(2단계, AI가 함께 언급한 특징) — **해결됨(2026-09-03)**.
   백엔드 구현(lib/aggregator.ts: attemptKeywordExtraction 경쟁사 재호출 +
   competitor_data.topKeywords) + 기존 504개 daily 행 백필(738건, 실패 0건)

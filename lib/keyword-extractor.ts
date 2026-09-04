@@ -44,6 +44,7 @@
 import { computeBrandSegments, getSegmentText } from './citation-linker';
 
 import { ANTHROPIC_API_URL, ANTHROPIC_MODEL, ANTHROPIC_VERSION } from './llm-config';
+import { logLlmCallSuccess, logLlmCallFailure, type LlmCallKind, type LlmRunKind } from './llm-usage';
 
 // ── 입력 타입 ──
 
@@ -135,10 +136,20 @@ ${numberedParagraphs}`;
  *
  * @param brandName 문단 안에서 설명 대상이 되는 브랜드의 정식 명칭
  * @param paragraphs buildBrandParagraphs()가 만든 문단 목록 (1개 이상이어야 함)
+ * @param usageContext 호출 1건 usage 로깅용 맥락(lib/llm-usage.ts, 2026-09-04
+ *   예산 사고 후속 안전장치). 생략하면 kind='target', runKind='manual'로 남는다 —
+ *   app/api/test-keyword-extraction처럼 집계 실행 밖에서 단발로 부르는 곳용.
  */
 export async function extractExpressionsFromParagraphs(
   brandName: string,
-  paragraphs: BrandParagraph[]
+  paragraphs: BrandParagraph[],
+  usageContext?: {
+    kind?: LlmCallKind;
+    runKind?: LlmRunKind;
+    brandId?: string | null;
+    queryId?: string | null;
+    engine?: string | null;
+  }
 ): Promise<ParagraphKeywords[]> {
   if (paragraphs.length === 0) return [];
 
@@ -146,6 +157,17 @@ export async function extractExpressionsFromParagraphs(
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
   }
+
+  const logCtx = {
+    site: 'keyword-extractor',
+    model: ANTHROPIC_MODEL,
+    kind: usageContext?.kind ?? ('target' as LlmCallKind),
+    runKind: usageContext?.runKind ?? ('manual' as LlmRunKind),
+    brandName,
+    brandId: usageContext?.brandId ?? null,
+    queryId: usageContext?.queryId ?? null,
+    engine: usageContext?.engine ?? null,
+  };
 
   const prompt = buildExtractionPrompt(brandName, paragraphs);
 
@@ -199,10 +221,12 @@ export async function extractExpressionsFromParagraphs(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logLlmCallFailure(logCtx, response.status, errorBody);
     throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
   }
 
   const data = await response.json();
+  if (data.usage) logLlmCallSuccess(logCtx, data.usage);
 
 // 응답 파싱은 다음 조각(3/3)에서 이어감 — 일단 여기까지만.
 //  console.log('API 원본 응답(임시):', JSON.stringify(data, null, 2));

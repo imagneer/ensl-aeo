@@ -45,6 +45,30 @@
  */
 
 import { ANTHROPIC_API_URL, ANTHROPIC_MODEL_SONNET, ANTHROPIC_VERSION } from './llm-config';
+import { logLlmCallSuccess, logLlmCallFailure } from './llm-usage';
+
+/**
+ * 이 파일 5개 LLM 호출 함수(groupSimilarExpressions/writeOneLiner/
+ * reviewOneLiner/detectFeatureConflicts/reviewFeatureConflicts) 전부가
+ * 같은 형태로 usage를 로깅하도록 여기 한 번만 감싼다(2026-09-04, 예산
+ * 사고 후속 안전장치). brandId/queryId/engine은 이 단계에선 안 넘긴다 —
+ * 브랜드 한 줄 합성은 진단(브랜드) 단위 실행이라 쿼리·엔진 개념이 없다.
+ */
+function logOneLinerUsage(fnName: string, brandName: string, usage: unknown): void {
+  if (usage && typeof usage === 'object') {
+    logLlmCallSuccess(
+      { site: `brand-one-liner:${fnName}`, model: ANTHROPIC_MODEL_SONNET, kind: 'oneLiner', runKind: 'cron', brandName },
+      usage as { input_tokens: number; output_tokens: number }
+    );
+  }
+}
+function logOneLinerFailure(fnName: string, brandName: string, status: number, body: string): void {
+  logLlmCallFailure(
+    { site: `brand-one-liner:${fnName}`, model: ANTHROPIC_MODEL_SONNET, kind: 'oneLiner', runKind: 'cron', brandName },
+    status,
+    body
+  );
+}
 import {
   type StoredBrandExpression,
   type StoredDiagnosis,
@@ -181,10 +205,12 @@ async function groupSimilarExpressions(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logOneLinerFailure('groupSimilarExpressions', brandName, response.status, errorBody);
     throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
   }
 
   const data = await response.json();
+  logOneLinerUsage('groupSimilarExpressions', brandName, data.usage);
   const blocks: { type: string; input?: unknown }[] = data.content ?? [];
   const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
   if (!toolUseBlock || typeof toolUseBlock.input !== 'object' || toolUseBlock.input === null) {
@@ -502,10 +528,12 @@ async function writeOneLiner(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logOneLinerFailure('writeOneLiner', brandName, response.status, errorBody);
     throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
   }
 
   const data = await response.json();
+  logOneLinerUsage('writeOneLiner', brandName, data.usage);
   const blocks: { type: string; input?: unknown }[] = data.content ?? [];
   const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
   const oneLiner = (toolUseBlock?.input as { one_liner?: unknown })?.one_liner;
@@ -603,10 +631,12 @@ async function reviewOneLiner(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logOneLinerFailure('reviewOneLiner', brandName, response.status, errorBody);
     throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
   }
 
   const data = await response.json();
+  logOneLinerUsage('reviewOneLiner', brandName, data.usage);
   const blocks: { type: string; input?: unknown }[] = data.content ?? [];
   const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
   const input = toolUseBlock?.input as
@@ -723,10 +753,12 @@ async function detectFeatureConflicts(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logOneLinerFailure('detectFeatureConflicts', brandName, response.status, errorBody);
     throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
   }
 
   const data = await response.json();
+  logOneLinerUsage('detectFeatureConflicts', brandName, data.usage);
   const blocks: { type: string; input?: unknown }[] = data.content ?? [];
   const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
   const rawConflicts = (toolUseBlock?.input as { conflicts?: unknown })?.conflicts;
@@ -835,10 +867,12 @@ async function reviewFeatureConflicts(
 
   if (!response.ok) {
     const errorBody = await response.text();
+    logOneLinerFailure('reviewFeatureConflicts', brandName, response.status, errorBody);
     throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
   }
 
   const data = await response.json();
+  logOneLinerUsage('reviewFeatureConflicts', brandName, data.usage);
   const blocks: { type: string; input?: unknown }[] = data.content ?? [];
   const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
   const rawResults = (toolUseBlock?.input as { results?: unknown })?.results;

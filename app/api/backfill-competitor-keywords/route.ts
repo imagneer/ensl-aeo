@@ -18,6 +18,11 @@ export const maxDuration = 800; // Vercel Pro(Fluid Compute) 상한 — CLAUDE.m
  *
  * 사용법: /api/backfill-competitor-keywords?maxCalls=150
  * maxCalls를 안 주면 기본값(150) 사용.
+ *
+ * ⚠️ 대량 호출 가드(2026-09-04, 9/3 예산 소진 사고 후속 "작업 3"): 실제
+ * 실행 전에 반드시 ?dryRun=1로 먼저 몇 건이 나갈지 확인할 것. dry-run은
+ * LLM을 안 부르고 예상 비용만 계산해서 돌려준다(대략치 — lib/llm-config.ts
+ * ESTIMATED_TOKENS_PER_KEYWORD_CALL 주석 참고).
  */
 export async function GET(request: Request) {
   if (!isAuthorizedCronRequest(request)) {
@@ -28,9 +33,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const maxCallsParam = searchParams.get('maxCalls');
     const maxCalls = maxCallsParam ? Number(maxCallsParam) : 150;
+    const dryRun = searchParams.get('dryRun') === '1';
 
-    console.log(`=== 경쟁사 키워드 백필 시작 (maxCalls=${maxCalls}) ===`);
-    const result = await backfillCompetitorKeywords(maxCalls);
+    console.log(`=== 경쟁사 키워드 백필 시작 (maxCalls=${maxCalls}, dryRun=${dryRun}) ===`);
+    const result = await backfillCompetitorKeywords(maxCalls, dryRun);
     console.log('=== 경쟁사 키워드 백필 완료 ===', result);
 
     return NextResponse.json({
