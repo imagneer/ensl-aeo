@@ -18,7 +18,7 @@
  * 원칙 4번). 실패해도 어떤 사이트가 몇 번 시도했는지는 알아야 한다.
  */
 
-export type LlmCallKind = 'target' | 'competitor' | 'expression' | 'retry' | 'oneLiner';
+export type LlmCallKind = 'target' | 'competitor' | 'expression' | 'retry' | 'oneLiner' | 'placementRole';
 export type LlmRunKind = 'cron' | 'backfill' | 'retry' | 'manual';
 
 export interface LlmCallContext {

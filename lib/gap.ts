@@ -1,0 +1,205 @@
+// lib/gap.ts
+
+/**
+ * Day22 "인지와 위치의 간극" 화면 — 순수 계산 함수만 모아둔 파일.
+ * DB 접근(mention_feature_roles·brand_feature_candidates·자리질문
+ * snapshots 조회)은 app/(dashboard)/gap/page.tsx가 lib/supabase.ts로
+ * 끝내고, 이 파일은 그 결과를 입력으로 받아 파생시킨다 — "판단 로직을
+ * 화면 컴포넌트에 넣지 않기" 원칙(lib/query-detail.ts와 동일한 이유).
+ *
+ * ⚠️ LLM이 생성하는 문장(why-box 설명, counter-box "왜 제외됐는지" 설명)은
+ * 이 파일 범위 밖이다 — 판정+검수 분리가 필요한 별도 LLM 호출로, 다음
+ * 단계에서 lib/mention-feature-roles.ts에 추가할 예정(2026-09-05 계획).
+ * 이 파일은 그 설명문을 만들 때 필요한 "어떤 mention을 근거로 쓸지"까지만
+ * 골라준다.
+ *
+ * ─────────────────────────────────────────────────────────
+ * 핵심 공식 (2026-09-05 루아 확인)
+ * ─────────────────────────────────────────────────────────
+ *  - 인지측 비율("AI가 알고 있음") = engineCount / engineTotal
+ *    (brand_feature_candidates, v1.1 기존 데이터 재사용 — 신규 로직 없음
+ *    원칙, 질문/일수 커버리지 대신 "AI 개수" 프레이밍인 이걸 골랐다)
+ *  - 자리측 분모("자리질문 9개 전체 관측") = 9개 자리질문의 유효 관측
+ *    (status=success && search_performed=true, lib/query-detail.ts
+ *    computeAppearanceHeaderStats와 동일 정의)을 합산한 실측치 —
+ *    9×6×7=378 같은 이론값이 아니다.
+ *  - 자리측 분자 = mention_feature_roles에서 role='reason_stated'로
+ *    저장된 mention 수 (feature_text로 매칭, brand_feature_candidates에
+ *    id 참조가 없어서 문자열 일치로 묶는다 — 저장 시 항상
+ *    candidate.featureName을 그대로 썼으므로 정확히 일치한다)
+ *  - pill 분류는 새 임계값을 만들지 않고 기존 passed_min_criteria(v1.1,
+ *    지금까지 화면에서 안 쓰이고 있었지만 이미 계산돼 있던 값)를
+ *    "인지가 확정 수준인가"의 기준으로 재사용한다:
+ *      passed_min_criteria=true  + reason_stated 0건   → '간극 있음'
+ *      passed_min_criteria=true  + reason_stated 1건+  → '추천 근거로 확인됨'
+ *      passed_min_criteria=false + reason_stated 1건+  → '추천에서 발견'
+ *      passed_min_criteria=false + reason_stated 0건   → 목록에 안 보여줌
+ *        (인지도 자리도 둘 다 신호가 없어서 "간극"이라 부를 근거 자체가 없음)
+ *    지역_조건 카테고리는 위 분류와 무관하게 항상 '조건 정보'.
+ */
+
+import type {
+  FeatureCategory,
+  StoredBrandFeatureCandidate,
+  MentionFeatureRoleRow,
+  QuerySnapshotRecord,
+} from './supabase';
+import { classifyExposureBadge, type ExposureBadge } from './badge-thresholds';
+import { computeAppearanceHeaderStats } from './query-detail';
+
+/**
+ * 자리질문 9개 각각의 snapshot 레코드 배열을 받아 "유효 관측" 합계를
+ * 낸다 — brand-position.ts(Day21)가 질문별 통계를 page.tsx에서 fetch한
+ * 배치 결과로 계산하는 것과 같은 분업(순수 계산은 lib, fetch·합산 루프는
+ * 호출부)을 따른다. 여기서는 합산까지 lib에 두는 이유: 이 합계 하나가
+ * 특징 여러 개가 전부 공유하는 "전역 분모"라서, 화면 쪽에서 매번 다시
+ * 합산 코드를 짜면 실수하기 쉽다(알려진 정합성 이슈 2번과 같은 종류).
+ */
+export function sumPlacementTotalValidRuns(recordsByQuery: QuerySnapshotRecord[][]): number {
+  return recordsByQuery.reduce((sum, records) => sum + computeAppearanceHeaderStats(records).totalValidRuns, 0);
+}
+
+export type GapPill = 'gap' | 'works' | 'new' | 'condition' | null;
+
+export const GAP_PILL_LABEL: Record<Exclude<GapPill, null>, string> = {
+  gap: '간극 있음',
+  works: '추천 근거로 확인됨',
+  new: '추천에서 발견',
+  condition: '조건 정보',
+};
+
+export interface FeatureGapStat {
+  featureId: string;
+  featureName: string;
+  category: FeatureCategory;
+  isLocationContext: boolean;
+  awarenessRatio: number;
+  awarenessEngineCount: number;
+  awarenessEngineTotal: number;
+  placementReasonStatedCount: number;
+  placementCoMentionedCount: number;
+  /** 모든 특징이 공유하는 전역 분모(자리질문 9개 합산 유효 관측) — 특징별로 다르지 않다. */
+  placementTotalValidRuns: number;
+  placementReasonStatedRatio: number;
+  placementBadge: ExposureBadge;
+  /** awarenessRatio - placementReasonStatedRatio. 양수가 클수록 "인지는 있는데 자리에선 안 이어짐". */
+  gapSize: number;
+  pill: GapPill;
+}
+
+/**
+ * feature_text 문자열 일치로 mention_feature_roles를 특징별로 묶는다.
+ * (mention_feature_roles엔 candidate id 참조가 없다 — 작업지시서 §2 설계 그대로)
+ */
+function countRolesByFeatureText(roleRows: MentionFeatureRoleRow[]): {
+  reasonStated: Map<string, number>;
+  coMentioned: Map<string, number>;
+} {
+  const reasonStated = new Map<string, number>();
+  const coMentioned = new Map<string, number>();
+  for (const row of roleRows) {
+    const map = row.role === 'reason_stated' ? reasonStated : coMentioned;
+    map.set(row.featureText, (map.get(row.featureText) ?? 0) + 1);
+  }
+  return { reasonStated, coMentioned };
+}
+
+function classifyPill(isLocationContext: boolean, passedMinCriteria: boolean, reasonStatedCount: number): GapPill {
+  if (isLocationContext) return 'condition';
+  if (passedMinCriteria) return reasonStatedCount > 0 ? 'works' : 'gap';
+  return reasonStatedCount > 0 ? 'new' : null;
+}
+
+export function buildFeatureGapStats(
+  candidates: StoredBrandFeatureCandidate[],
+  roleRows: MentionFeatureRoleRow[],
+  placementTotalValidRuns: number
+): FeatureGapStat[] {
+  const { reasonStated, coMentioned } = countRolesByFeatureText(roleRows);
+
+  return candidates.map((c): FeatureGapStat => {
+    const isLocationContext = c.category === '지역_조건';
+    const awarenessRatio = c.engineTotal > 0 ? c.engineCount / c.engineTotal : 0;
+    const reasonStatedCount = reasonStated.get(c.featureName) ?? 0;
+    const coMentionedCount = coMentioned.get(c.featureName) ?? 0;
+    const placementReasonStatedRatio =
+      placementTotalValidRuns > 0 ? reasonStatedCount / placementTotalValidRuns : 0;
+
+    return {
+      featureId: c.id,
+      featureName: c.featureName,
+      category: c.category,
+      isLocationContext,
+      awarenessRatio,
+      awarenessEngineCount: c.engineCount,
+      awarenessEngineTotal: c.engineTotal,
+      placementReasonStatedCount: reasonStatedCount,
+      placementCoMentionedCount: coMentionedCount,
+      placementTotalValidRuns,
+      placementReasonStatedRatio,
+      placementBadge: classifyExposureBadge(placementTotalValidRuns, placementReasonStatedRatio),
+      gapSize: awarenessRatio - placementReasonStatedRatio,
+      pill: classifyPill(isLocationContext, c.passedMinCriteria, reasonStatedCount),
+    };
+  });
+}
+
+/** 화면 목록에 실제로 보여줄 것만 남긴다 — pill이 null인 건 "간극이라 부를 근거 자체가 없음". */
+export function visibleGapFeatures(stats: FeatureGapStat[]): FeatureGapStat[] {
+  return stats.filter((s) => s.pill !== null);
+}
+
+/**
+ * Hero(가장 큰 간극) 선정 — pill='gap'인 것 중 gapSize가 가장 큰 특징 하나.
+ * '조건 정보'(지역 맥락)는 애초에 "간극" 개념이 성립 안 해서 후보에서 뺀다
+ * (작업지시서 §3-2가 예시로 든 "전문의 협진: 인지 높음·자리 근거 0" 패턴과
+ * 일치 — pill='gap'이 정확히 이 패턴을 가리킨다).
+ */
+export function selectGapHero(stats: FeatureGapStat[]): FeatureGapStat | null {
+  const candidates = stats.filter((s) => s.pill === 'gap');
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, cur) => (cur.gapSize > best.gapSize ? cur : best));
+}
+
+/** 화면 정렬 순서 — 간극이 큰 것부터, 그다음 근거로 확인된 것, 발견된 것, 마지막 조건 정보. */
+const PILL_SORT_ORDER: Record<Exclude<GapPill, null>, number> = { gap: 0, works: 1, new: 2, condition: 3 };
+
+export function sortForFeatureList(stats: FeatureGapStat[]): FeatureGapStat[] {
+  return [...stats].sort((a, b) => {
+    const pillDiff = PILL_SORT_ORDER[a.pill as Exclude<GapPill, null>] - PILL_SORT_ORDER[b.pill as Exclude<GapPill, null>];
+    if (pillDiff !== 0) return pillDiff;
+    return b.gapSize - a.gapSize;
+  });
+}
+
+/**
+ * counter-box("반대 증거와 제외된 사례")용 — co_mentioned로만 판정된
+ * mention_id 목록을 특징별로 묶어서 돌려준다. 실제 "왜 제외됐는지" 설명
+ * 문장은 이 파일 범위 밖(LLM 판정+검수 별도 호출, 위 파일 헤더 참고) —
+ * 여기서는 그 호출에 넘길 "어떤 mention을 근거로 쓸지"만 고른다.
+ *
+ * reason_stated가 하나도 없이 co_mentioned만 있는 특징만 대상으로 한다 —
+ * 이미 reason_stated가 있는 특징(pill='works')은 "제외된 사례"라는 프레이밍이
+ * 안 맞는다(근거로 이미 확인됐는데 "제외됐다"고 말하면 모순).
+ */
+export function selectCounterBoxCandidates(
+  stats: FeatureGapStat[],
+  roleRows: MentionFeatureRoleRow[],
+  maxPerFeature = 1
+): { featureId: string; featureName: string; mentionIds: string[] }[] {
+  const coMentionedMentionIdsByFeature = new Map<string, string[]>();
+  for (const row of roleRows) {
+    if (row.role !== 'co_mentioned') continue;
+    const list = coMentionedMentionIdsByFeature.get(row.featureText) ?? [];
+    list.push(row.mentionId);
+    coMentionedMentionIdsByFeature.set(row.featureText, list);
+  }
+
+  return stats
+    .filter((s) => !s.isLocationContext && s.placementReasonStatedCount === 0 && s.placementCoMentionedCount > 0)
+    .map((s) => ({
+      featureId: s.featureId,
+      featureName: s.featureName,
+      mentionIds: (coMentionedMentionIdsByFeature.get(s.featureName) ?? []).slice(0, maxPerFeature),
+    }));
+}

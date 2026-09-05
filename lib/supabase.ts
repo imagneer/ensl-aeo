@@ -1634,6 +1634,204 @@ export async function fetchBrandFeatureConflictsForDiagnosis(
   }));
 }
 
+// ── Day22 "인지와 위치의 간극" — 자리질문 역할판정 대상 조회 ──
+
+export interface PlacementMentionForRoleJudgment {
+  mentionId: string;
+  snapshotId: string;
+  queryId: string;
+  engine: string;
+  executedAt: string;
+  rawResponse: string;
+}
+
+/**
+ * 자리 질문(query_type='자리') 답변 중, 이 브랜드가 is_target=true로 등장한
+ * mention들을 가져온다 — mention_feature_roles 판정 대상(작업지시서 §1-4,
+ * "자리 질문만, 우리 브랜드만").
+ *
+ * ⚠️ mentions 테이블엔 원문 내 위치(position)가 저장 안 돼 있어서
+ * (attemptKeywordExtraction과 같은 이유, lib/aggregator.ts 주석 참고),
+ * 이 함수는 mention_id ↔ snapshot 매핑만 만들어 돌려준다. 실제 "우리
+ * 브랜드 구간" 텍스트는 호출부가 parseBrandMentions로 rawResponse를
+ * 다시 파싱해서 만들어야 한다(lib/citation-linker.ts computeBrandSegments).
+ */
+export async function fetchPlacementMentionsForRoleJudgment(
+  brandId: string,
+  periodStart: string, // UTC ISO
+  periodEnd: string // UTC ISO
+): Promise<PlacementMentionForRoleJudgment[]> {
+  const { data: queries, error: queryError } = await supabaseAdmin
+    .from('queries')
+    .select('id')
+    .eq('brand_id', brandId)
+    .eq('query_type', '자리');
+
+  if (queryError) {
+    console.error('간극 화면용 자리질문 조회 실패:', queryError);
+    return [];
+  }
+  const queryIds = (queries ?? []).map((q) => q.id);
+  if (queryIds.length === 0) return [];
+
+  // "유효 관측" 정의는 프로젝트 표준(lib/query-detail.ts 규칙 C)과 동일하게
+  // status='success' && search_performed=true로 맞춘다 — 처음엔
+  // search_performed 조건이 빠져 있었는데(2026-09-05), 이미 돌린 백필
+  // 338건을 실측 대조해보니 대상 snapshot 113개 전부 search_performed=true라
+  // 데이터 오염은 없었음(우연히 무해) — 그래도 정의를 어긋난 채 놔두면
+  // 다음 백필부터 실제로 갈릴 수 있어 여기서 바로잡는다.
+  const { data: snapshots, error: snapshotError } = await supabaseAdmin
+    .from('snapshots')
+    .select('id, query_id, engine, executed_at, raw_response')
+    .in('query_id', queryIds)
+    .eq('status', 'success')
+    .eq('search_performed', true)
+    .gte('executed_at', periodStart)
+    .lt('executed_at', periodEnd);
+
+  if (snapshotError) {
+    console.error('간극 화면용 snapshots 조회 실패:', snapshotError);
+    return [];
+  }
+  if (!snapshots || snapshots.length === 0) return [];
+
+  const snapshotIds = snapshots.map((s) => s.id);
+  const { data: mentions, error: mentionError } = await supabaseAdmin
+    .from('mentions')
+    .select('id, snapshot_id')
+    .in('snapshot_id', snapshotIds)
+    .eq('brand_id', brandId)
+    .eq('is_target', true);
+
+  if (mentionError) {
+    console.error('간극 화면용 mentions 조회 실패:', mentionError);
+    return [];
+  }
+
+  // mentions는 (snapshot_id, brand_id) 조합당 최대 1행이라 1:1 매핑이 안전하다
+  // (파서가 브랜드당 최초 등장 위치 하나로 이미 합쳐서 저장 — lib/parser.ts 참고).
+  const mentionIdBySnapshot = new Map((mentions ?? []).map((m) => [m.snapshot_id, m.id]));
+
+  return snapshots
+    .filter((s) => mentionIdBySnapshot.has(s.id))
+    .map((s) => ({
+      mentionId: mentionIdBySnapshot.get(s.id)!,
+      snapshotId: s.id,
+      queryId: s.query_id,
+      engine: s.engine,
+      executedAt: s.executed_at,
+      rawResponse: s.raw_response,
+    }));
+}
+
+export interface MentionFeatureRoleToSave {
+  mentionId: string;
+  featureText: string;
+  role: 'reason_stated' | 'co_mentioned';
+  judgedBy: string;
+  reviewedBy: string;
+}
+
+/**
+ * 검수(Sonnet)를 통과한 역할판정 결과만 받는다 — 판정만 하고 검수 전인
+ * 상태는 이 함수에 안 들어온다(호출부 lib/mention-feature-roles.ts가 보장).
+ * 그래서 reviewed는 항상 true, reviewed_by는 항상 judged_by와 다른 값으로
+ * 저장한다(작업지시서 §2 "자기검수 방지" 그대로).
+ */
+export async function saveMentionFeatureRoles(rows: MentionFeatureRoleToSave[]): Promise<string[]> {
+  if (rows.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('mention_feature_roles')
+    .insert(
+      rows.map((r) => ({
+        mention_id: r.mentionId,
+        feature_text: r.featureText,
+        role: r.role,
+        judged_by: r.judgedBy,
+        reviewed: true,
+        reviewed_by: r.reviewedBy,
+      }))
+    )
+    .select('id');
+
+  if (error) {
+    console.error('mention_feature_roles 저장 실패:', error);
+    return [];
+  }
+  if (data.length !== rows.length) {
+    console.error(`mention_feature_roles 저장 개수 불일치: 입력 ${rows.length}건, 반환 ${data.length}건`);
+  }
+  return data.map((row) => row.id);
+}
+
+/**
+ * 이미 역할판정(mention_feature_roles 저장)이 끝난 mention_id 집합을
+ * 가져온다 — 재실행 시 같은 mention을 또 판정해서 중복 행이 쌓이는 걸
+ * 막기 위함(2026-09-05, brand_one_liners 중복 사고 이후 같은 종류 실수를
+ * 미리 방지 — deleteBrandOneLinerArtifacts 참고). 판정 자체가 멱등하지
+ * 않으니(같은 텍스트도 LLM 호출마다 살짝 다르게 나올 수 있음), "이미 한
+ * 것"의 기준은 delete-then-insert가 아니라 "건너뛰기"로 잡는다 — 대상
+ * 자체가 계속 늘어나는(매일 새 mention 생기는) 백필이라 delete-then-insert
+ * 의미가 없다(brand_one_liners는 "같은 diagnosis 재실행"이 기준이었던 것과
+ * 다름).
+ */
+export async function fetchAlreadyJudgedMentionIds(mentionIds: string[]): Promise<Set<string>> {
+  if (mentionIds.length === 0) return new Set();
+
+  const { data, error } = await supabaseAdmin
+    .from('mention_feature_roles')
+    .select('mention_id')
+    .in('mention_id', mentionIds);
+
+  if (error) {
+    console.error('mention_feature_roles 기존 판정 여부 조회 실패:', error);
+    return new Set();
+  }
+
+  return new Set((data ?? []).map((row) => row.mention_id));
+}
+
+export interface MentionFeatureRoleRow {
+  mentionId: string;
+  featureText: string;
+  role: 'reason_stated' | 'co_mentioned';
+}
+
+/**
+ * Day22 화면이 읽을 때 쓴다 — fetchPlacementMentionsForRoleJudgment로 이미
+ * 확정된 "자리질문 × 이 브랜드 × 기간" 범위를 그대로 재사용해서, 화면과
+ * 백필이 서로 다른 mention 집합을 보는 정합성 문제를 원천 차단한다.
+ * reviewed=false인 행은 없어야 정상이지만(saveMentionFeatureRoles가 항상
+ * true로 저장), 방어적으로 한 번 더 걸러둔다.
+ */
+export async function fetchMentionFeatureRolesForPlacement(
+  brandId: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<MentionFeatureRoleRow[]> {
+  const mentions = await fetchPlacementMentionsForRoleJudgment(brandId, periodStart, periodEnd);
+  const mentionIds = mentions.map((m) => m.mentionId);
+  if (mentionIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('mention_feature_roles')
+    .select('mention_id, feature_text, role')
+    .in('mention_id', mentionIds)
+    .eq('reviewed', true);
+
+  if (error) {
+    console.error('간극 화면용 mention_feature_roles 조회 실패:', error);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    mentionId: row.mention_id,
+    featureText: row.feature_text,
+    role: row.role,
+  }));
+}
+
 // ── 생성된 브랜드 한 줄 (brand_one_liners) ──
 
 /**
