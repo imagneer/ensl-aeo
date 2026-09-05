@@ -1504,7 +1504,11 @@ export async function fetchBrandFeatureCandidatesForDiagnosis(
     .select(
       'id, diagnosis_id, brand_id, feature_name, category, question_count, question_total, engine_count, engine_total, day_count, day_total, passed_min_criteria, tier, evidence_expression_ids'
     )
-    .eq('diagnosis_id', diagnosisId);
+    .eq('diagnosis_id', diagnosisId)
+    // 2026-09-04, 재시도 중복 방어(아래 deleteBrandOneLinerArtifacts로
+    // 정상 경로에선 이미 막히지만, 혹시 중복이 남아도 화면에 최신 것부터
+    // 뜨게 하는 2중 안전장치 — 루아 지시).
+    .order('created_at', { ascending: false });
 
   if (error) {
     console.error('brand_feature_candidates 조회 실패:', error);
@@ -1872,6 +1876,62 @@ export type TipContent = TipContentData | null;
  *     (Day22/23에서 이 필드를 다시 쓸 때 특히 주의)
  *   - '근거부족'·'잘못된인지'는 각각 null / 별도 정의된 경고 문구
  */
+/**
+ * synthesizeBrandOneLiner를 다시 실행하기 전에, 같은 diagnosis_id로 이전
+ * 실행이 이미 저장해둔 행(brand_one_liners/brand_feature_candidates/
+ * brand_feature_conflicts)을 전부 지운다.
+ *
+ * 왜 필요한가 (2026-09-04, 루아 지시): synthesizeBrandOneLiner는 재시도
+ * 가능한 구조인데, 기존 저장 함수들은 plain insert라서 같은 diagnosis_id로
+ * 두 번 실행되면(테스트 재실행이든 9/8 부분실패 후 재시도든) 새 행만
+ * 계속 추가되고 옛 행은 안 지워졌다. fetchLatestBrandOneLiner의
+ * rows.find()는 배열의 "첫 매치"를 쓰는데 Postgres는 순서를 보장하지
+ * 않으므로, 중복이 쌓이면 어떤 실행 결과가 "최신"으로 보일지 예측할 수
+ * 없어진다 — 화면에 조용히 옛날 판정이 뜰 수 있는 위험(CLAUDE.md 절대
+ * 원칙 4번 "실패를 조용히 삼키지 않는다"와 같은 종류의 문제).
+ *
+ * ⚠️ 개별 저장 함수 안에서 "저장 직전에 지우기"로 하지 않고, 이 함수를
+ * synthesizeBrandOneLiner 맨 앞에서 한 번만 호출하는 이유: 정상 실행
+ * 1회 안에서도 brand_one_liners는 최대 2번(정상 계열 + '잘못된인지')
+ * 저장된다 — 둘 다 같은 실행의 합법적인 결과물이라, 두 번째 저장 직전에
+ * 첫 번째 저장분까지 지우면 방금 만든 정상 결과가 사라진다.
+ *
+ * FK 순서 주의: brand_feature_conflicts가 brand_feature_candidates.id를
+ * 참조하므로 conflicts → candidates → one_liners 순으로 지운다.
+ */
+export async function deleteBrandOneLinerArtifacts(diagnosisId: string): Promise<void> {
+  const { error: conflictsError } = await supabaseAdmin
+    .from('brand_feature_conflicts')
+    .delete()
+    .eq('diagnosis_id', diagnosisId);
+  if (conflictsError) {
+    // 2026-09-04, 루아 지시 — 여기서 조용히 넘어가면(console.error만) 옛 행이
+    // 안 지워진 채로 아래 로직이 새 행을 또 insert해서, 막으려던 중복이
+    // 그대로 재현된다. throw로 synthesizeBrandOneLiner 전체를 중단시켜
+    // diagnoses.status를 'collecting'에 남기고(checkAndCompleteDiagnoses가
+    // completeDiagnosis를 안 부름) 다음날 fetchExpiredDiagnoses가 다시
+    // 집어서 재시도하게 한다 — 부분 삭제 상태로 insert가 진행되는 것보다
+    // 이번 회차를 통째로 실패 처리하는 게 안전하다.
+    throw new Error(`brand_feature_conflicts 기존 행 삭제 실패: ${conflictsError.message}`);
+  }
+
+  const { error: candidatesError } = await supabaseAdmin
+    .from('brand_feature_candidates')
+    .delete()
+    .eq('diagnosis_id', diagnosisId);
+  if (candidatesError) {
+    throw new Error(`brand_feature_candidates 기존 행 삭제 실패: ${candidatesError.message}`);
+  }
+
+  const { error: oneLinersError } = await supabaseAdmin
+    .from('brand_one_liners')
+    .delete()
+    .eq('diagnosis_id', diagnosisId);
+  if (oneLinersError) {
+    throw new Error(`brand_one_liners 기존 행 삭제 실패: ${oneLinersError.message}`);
+  }
+}
+
 export interface BrandOneLinerToSave {
   diagnosisId: string;
   brandId: string;
@@ -2164,7 +2224,13 @@ export async function fetchLatestBrandOneLiner(
     .select(
       'id, diagnosis_id, status, one_liner, selected_feature_ids, location_context_id, question_ids, engine_list, reviewed_by_human, tip_content'
     )
-    .eq('diagnosis_id', diagnosis.id);
+    .eq('diagnosis_id', diagnosis.id)
+    // 2026-09-04, 재시도 중복 방어. 이 테이블엔 created_at이 없고
+    // generated_at이 실제 생성 시각 컬럼이다(schema 확인) — 이름이 다른데
+    // created_at으로 썼으면 조용히 런타임 에러가 났을 것(CLAUDE.md 절대원칙
+    // 1번). 아래 rows.find()가 배열의 "첫 매치"를 쓰는데, Postgres는 순서를
+    // 보장하지 않아서 중복이 생기면 어떤 실행 결과가 뜰지 예측 불가능했다.
+    .order('generated_at', { ascending: false });
 
   if (error) {
     console.error('brand_one_liners 조회 실패:', error);

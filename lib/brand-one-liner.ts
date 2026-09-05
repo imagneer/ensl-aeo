@@ -87,6 +87,7 @@ import {
   saveBrandOneLiner,
   saveBrandFeatureCandidates,
   saveBrandFeatureConflicts,
+  deleteBrandOneLinerArtifacts,
 } from './supabase';
 import { kstDayBoundsUtc } from './aggregator';
 import { ENGINE_NAMES, ENGINE_CONFIG, type EngineName } from './engine-config';
@@ -1047,6 +1048,12 @@ export async function synthesizeBrandOneLiner(
   brandName: string,
   endedAt: string
 ): Promise<SynthesisResult> {
+  // 2026-09-04, 루아 지시 — 재실행(테스트 재실행 · 9/8 부분실패 후 재시도)
+  // 시 이전 실행이 남긴 행이 쌓이지 않도록, 새로 생성하기 전에 이
+  // diagnosis_id의 기존 산출물을 전부 지운다. 상세 이유는
+  // deleteBrandOneLinerArtifacts 주석(lib/supabase.ts) 참고.
+  await deleteBrandOneLinerArtifacts(diagnosis.id);
+
   const expressions = await fetchBrandExpressionsForBrand(
     diagnosis.brandId,
     diagnosis.startedAt,
