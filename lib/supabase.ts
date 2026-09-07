@@ -1836,6 +1836,85 @@ export async function fetchMentionFeatureRolesForPlacement(
   }));
 }
 
+// ── Day22 후속 — why-box/counter-box 문구 저장 (gap_feature_narratives) ──
+
+export interface GapFeatureNarrativeCounterCase {
+  mentionId: string;
+  explanation: string;
+}
+
+export interface GapFeatureNarrativeToSave {
+  diagnosisId: string;
+  brandId: string;
+  featureText: string;
+  whyBoxSentences: string[];
+  counterBoxCases: GapFeatureNarrativeCounterCase[];
+  generatedBy: string;
+  reviewedBy: string;
+}
+
+/** 검수(Sonnet) 통과분만 받는다 — 실패분은 호출부가 아예 저장을 시도하지 않는다. */
+export async function saveGapFeatureNarrative(input: GapFeatureNarrativeToSave): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('gap_feature_narratives')
+    .insert({
+      diagnosis_id: input.diagnosisId,
+      brand_id: input.brandId,
+      feature_text: input.featureText,
+      why_box_sentences: input.whyBoxSentences,
+      counter_box_cases: input.counterBoxCases.length > 0 ? input.counterBoxCases : null,
+      generated_by: input.generatedBy,
+      reviewed: true,
+      reviewed_by: input.reviewedBy,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('gap_feature_narratives 저장 실패:', error);
+    return null;
+  }
+  return data.id;
+}
+
+export interface StoredGapFeatureNarrative {
+  featureText: string;
+  whyBoxSentences: string[];
+  counterBoxCases: GapFeatureNarrativeCounterCase[];
+}
+
+/** 화면(app/(dashboard)/gap/page.tsx)이 읽을 때 쓴다 — 재실행 대비 diagnosis_id 기준 최신 것만. */
+export async function fetchGapFeatureNarratives(
+  diagnosisId: string,
+  client: SupabaseClient
+): Promise<StoredGapFeatureNarrative[]> {
+  const { data, error } = await client
+    .from('gap_feature_narratives')
+    .select('feature_text, why_box_sentences, counter_box_cases, created_at')
+    .eq('diagnosis_id', diagnosisId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('gap_feature_narratives 조회 실패:', error);
+    return [];
+  }
+
+  // feature_text당 최신 1건만 — 재실행 시 예전 행이 남아있어도(현재는 삭제
+  // 안 하고 그냥 추가만 함) 화면엔 최신 것만 보이게 방어한다.
+  const seen = new Set<string>();
+  const result: StoredGapFeatureNarrative[] = [];
+  for (const row of data ?? []) {
+    if (seen.has(row.feature_text)) continue;
+    seen.add(row.feature_text);
+    result.push({
+      featureText: row.feature_text,
+      whyBoxSentences: row.why_box_sentences,
+      counterBoxCases: row.counter_box_cases ?? [],
+    });
+  }
+  return result;
+}
+
 // ── 생성된 브랜드 한 줄 (brand_one_liners) ──
 
 /**

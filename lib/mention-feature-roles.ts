@@ -65,6 +65,24 @@ import {
 
 export type MentionFeatureRole = 'reason_stated' | 'co_mentioned';
 
+/**
+ * snapshot 원문(rawResponse)에서 우리 브랜드 구간 텍스트를 재구성한다.
+ * mentions 테이블엔 position이 저장 안 돼 있어서(attemptKeywordExtraction과
+ * 같은 이유) 항상 재파싱이 필요하다 — 역할판정(runMentionFeatureRoleJudgment)과
+ * 문구 생성(lib/gap-narratives.ts) 양쪽에서 재사용한다.
+ */
+export function getBrandSegmentText(
+  rawResponse: string,
+  knownBrands: KnownBrand[],
+  ourBrandName: string
+): string | null {
+  const parsed = parseBrandMentions(rawResponse, knownBrands);
+  const allPositions = parsed.mentions.map((m) => ({ brandName: m.brandName, position: m.position }));
+  const segments = computeBrandSegments(rawResponse, allPositions);
+  const segment = segments.find((s) => s.anchorBrandName === ourBrandName);
+  return segment ? getSegmentText(rawResponse, segment) : null;
+}
+
 export interface FeatureForJudgment {
   id: string;
   name: string;
@@ -447,12 +465,9 @@ export async function runMentionFeatureRoleJudgment(
     }
 
     try {
-      const parsed = parseBrandMentions(mention.rawResponse, knownBrands);
-      const allPositions = parsed.mentions.map((m) => ({ brandName: m.brandName, position: m.position }));
-      const segments = computeBrandSegments(mention.rawResponse, allPositions);
-      const segment = segments.find((s) => s.anchorBrandName === ourBrand.name);
+      const segmentText = getBrandSegmentText(mention.rawResponse, knownBrands, ourBrand.name);
 
-      if (!segment) {
+      if (!segmentText) {
         // mentions 테이블 기준으론 등장했는데 재파싱하면 구간이 안 나옴 —
         // attemptKeywordExtraction과 같은 이유(저장된 mentions와 원문 재파싱
         // 결과가 어긋남). 같은 입력이면 항상 같은 결과라 재시도로 안 풀리므로
@@ -461,7 +476,6 @@ export async function runMentionFeatureRoleJudgment(
         continue;
       }
 
-      const segmentText = getSegmentText(mention.rawResponse, segment);
       const result = await processMentionForRoles(
         mention,
         ourBrand.name,

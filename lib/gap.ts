@@ -46,6 +46,7 @@ import type {
 } from './supabase';
 import { classifyExposureBadge, type ExposureBadge } from './badge-thresholds';
 import { computeAppearanceHeaderStats } from './query-detail';
+import { combineTopKeywords } from './brand-position';
 
 /**
  * 자리질문 9개 각각의 snapshot 레코드 배열을 받아 "유효 관측" 합계를
@@ -161,6 +162,15 @@ export function selectGapHero(stats: FeatureGapStat[]): FeatureGapStat | null {
   return candidates.reduce((best, cur) => (cur.gapSize > best.gapSize ? cur : best));
 }
 
+/**
+ * hero 문장 — tip-box도 이 문장을 그대로 재사용한다(작업지시서 §3-5,
+ * "hero 문장 재사용 원칙"). "~가/이" 주격 조사가 브랜드명 받침 유무에
+ * 따라 갈리는 걸 피하려고 "~에 ~가 있다는 사실" 구조로 통일했다.
+ */
+export function buildHeroSentence(brandName: string, hero: FeatureGapStat): string {
+  return `AI는 ${brandName}에 "${hero.featureName}" 특징이 있다는 사실은 알고 있지만, 추천 답변에서는 아직 이 특징을 근거로 사용하지 않았어요.`;
+}
+
 /** 화면 정렬 순서 — 간극이 큰 것부터, 그다음 근거로 확인된 것, 발견된 것, 마지막 조건 정보. */
 const PILL_SORT_ORDER: Record<Exclude<GapPill, null>, number> = { gap: 0, works: 1, new: 2, condition: 3 };
 
@@ -172,34 +182,110 @@ export function sortForFeatureList(stats: FeatureGapStat[]): FeatureGapStat[] {
   });
 }
 
+export interface CompetitorFeatureMention {
+  name: string;
+  count: number;
+}
+
+export interface CompetitorFeatureExpression {
+  keyword: string;
+  brandName: string;
+  count: number;
+}
+
+type AggregatedCompetitorRow = {
+  competitorData: Record<string, { name: string; topKeywords?: { keyword: string; count: number }[] | null }> | null;
+};
+
+/** "(...)" 안 예시 항목과 괄호 밖 본문을 핵심어 후보로 뽑는다. */
+function extractFeatureCoreTerms(featureName: string): string[] {
+  const parenMatch = featureName.match(/\(([^)]+)\)/);
+  const paren = parenMatch ? parenMatch[1] : '';
+  const withoutParen = featureName.replace(/\([^)]*\)/g, '').trim();
+
+  const terms = new Set<string>();
+  for (const part of paren.split(/[·,]/)) {
+    const t = part.replace(/\s*등\s*$/, '').trim();
+    if (t) terms.add(t);
+  }
+  if (withoutParen) terms.add(withoutParen);
+  return [...terms];
+}
+
 /**
- * counter-box("반대 증거와 제외된 사례")용 — co_mentioned로만 판정된
- * mention_id 목록을 특징별로 묶어서 돌려준다. 실제 "왜 제외됐는지" 설명
- * 문장은 이 파일 범위 밖(LLM 판정+검수 별도 호출, 위 파일 헤더 참고) —
- * 여기서는 그 호출에 넘길 "어떤 mention을 근거로 쓸지"만 고른다.
+ * 경쟁사 키워드(738건 백필) 중 이 특징의 핵심어를 포함하는 것만 골라
+ * {브랜드, 표현, 횟수}로 펼친다 — compare-box(브랜드별 합계)와
+ * expr-list(표현별 목록) 둘 다 이 결과에서 파생시킨다.
  *
- * reason_stated가 하나도 없이 co_mentioned만 있는 특징만 대상으로 한다 —
- * 이미 reason_stated가 있는 특징(pill='works')은 "제외된 사례"라는 프레이밍이
- * 안 맞는다(근거로 이미 확인됐는데 "제외됐다"고 말하면 모순).
+ * ⚠️ 정밀 매칭이 아니다 — 우리 특징명(brand_feature_candidates, 사람이
+ * 정리한 분류)과 경쟁사 키워드(LLM이 자유 형식으로 뽑은 원문 그대로의
+ * 구)는 taxonomy 자체가 다르다. 특징명에서 핵심어를 뽑아 경쟁사 키워드
+ * 문자열에 부분 일치하는지로 근사한다. 그래서 화면엔 반드시 "경쟁사
+ * 데이터는 아직 근거 연결 여부까지 판정되지 않았어요. 함께 언급된
+ * 횟수만 보여드려요" 캡션을 같이 띄운다(작업지시서 필수 캡션).
  */
-export function selectCounterBoxCandidates(
-  stats: FeatureGapStat[],
-  roleRows: MentionFeatureRoleRow[],
-  maxPerFeature = 1
-): { featureId: string; featureName: string; mentionIds: string[] }[] {
-  const coMentionedMentionIdsByFeature = new Map<string, string[]>();
-  for (const row of roleRows) {
-    if (row.role !== 'co_mentioned') continue;
-    const list = coMentionedMentionIdsByFeature.get(row.featureText) ?? [];
-    list.push(row.mentionId);
-    coMentionedMentionIdsByFeature.set(row.featureText, list);
+function matchCompetitorFeatureExpressions(
+  featureName: string,
+  aggregatedRows: AggregatedCompetitorRow[]
+): CompetitorFeatureExpression[] {
+  const coreTerms = extractFeatureCoreTerms(featureName);
+  if (coreTerms.length === 0) return [];
+
+  const keywordListsByName = new Map<string, { keyword: string; count: number }[][]>();
+  for (const row of aggregatedRows) {
+    for (const comp of Object.values(row.competitorData ?? {})) {
+      if (!keywordListsByName.has(comp.name)) keywordListsByName.set(comp.name, []);
+      keywordListsByName.get(comp.name)!.push(comp.topKeywords ?? []);
+    }
   }
 
-  return stats
-    .filter((s) => !s.isLocationContext && s.placementReasonStatedCount === 0 && s.placementCoMentionedCount > 0)
-    .map((s) => ({
-      featureId: s.featureId,
-      featureName: s.featureName,
-      mentionIds: (coMentionedMentionIdsByFeature.get(s.featureName) ?? []).slice(0, maxPerFeature),
-    }));
+  const result: CompetitorFeatureExpression[] = [];
+  for (const [name, lists] of keywordListsByName) {
+    const combined = combineTopKeywords(lists, 50);
+    for (const k of combined) {
+      if (coreTerms.some((term) => k.keyword.includes(term))) {
+        result.push({ keyword: k.keyword, brandName: name, count: k.count });
+      }
+    }
+  }
+
+  return result.sort((a, b) => b.count - a.count);
+}
+
+/** compare-box용 — 브랜드별 합계(작업지시서 §3-2). */
+export function computeCompetitorFeatureMentions(
+  featureName: string,
+  aggregatedRows: AggregatedCompetitorRow[]
+): CompetitorFeatureMention[] {
+  const matches = matchCompetitorFeatureExpressions(featureName, aggregatedRows);
+  const totalByName = new Map<string, number>();
+  for (const m of matches) totalByName.set(m.brandName, (totalByName.get(m.brandName) ?? 0) + m.count);
+  return [...totalByName.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+}
+
+/** expr-list용 — 표현별 목록, 상위 N개(작업지시서 §3-4). */
+export function computeCompetitorFeatureExpressions(
+  featureName: string,
+  aggregatedRows: AggregatedCompetitorRow[],
+  topN = 3
+): CompetitorFeatureExpression[] {
+  return matchCompetitorFeatureExpressions(featureName, aggregatedRows).slice(0, topN);
+}
+
+/**
+ * dp-fact("현재 확인된 사실") — why-box처럼 매번 LLM을 부르지 않고
+ * pill 종류에 따라 고정 문장을 조합한다(작업지시서 §1 범위는 why-box/
+ * counter-box뿐이라 이건 신규 LLM 호출 없이 코드로 처리, 2026-09-07 판단).
+ */
+export function buildFeatureConclusionSentence(stat: FeatureGapStat): string {
+  if (stat.pill === 'works') {
+    return 'AI가 알고 있는 특징이 실제 추천 답변에서도 근거로 이어지고 있어요. 이 특징은 계속 유지하는 게 좋아요.';
+  }
+  if (stat.pill === 'gap') {
+    return '이 특징은 AI가 알고는 있지만, 추천 답변에서는 아직 근거로 연결되지 않았어요.';
+  }
+  if (stat.pill === 'new') {
+    return 'AI가 이 특징은 잘 알지 못하지만, 실제 추천 답변에서는 근거로 쓰이고 있어요. 인지 쪽에 더 알려지면 인지와 추천이 더 가까워질 수 있어요.';
+  }
+  return '';
 }
