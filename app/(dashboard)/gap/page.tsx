@@ -33,7 +33,7 @@ import { MIN_RUNS_FOR_JUDGMENT } from '@/lib/badge-thresholds';
 import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
 import type { KnownBrand } from '@/lib/parser';
 import { GapTipsModal } from '@/components/GapTipsModal';
-import { GapFeatureList, GapFeatureRow } from '@/components/GapFeatureList';
+import { GapFeatureList, GapFeatureRow, GapFeatureDetailPanel } from '@/components/GapFeatureList';
 
 function engineLabel(engine: string): string {
   return ENGINE_CONFIG[engine as EngineName]?.label ?? engine;
@@ -438,22 +438,29 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
 
       <section style={{ marginBottom: 0 }}>
         <h2 className="sec">특징은 어디까지 이어졌을까?</h2>
-        <p className="sec-sub">중요한 간극부터 보여드려요. 항목을 누르면 아래 근거가 펼쳐져요.</p>
+        <p className="sec-sub">중요한 간극부터 보여드려요. 항목을 누르면 아래 근거가 바뀌어요.</p>
 
         <GapFeatureList defaultSelectedId={hero?.featureId ?? null}>
-          {sorted.map((stat) => (
-            <GapFeatureRow
-              key={stat.featureId}
-              featureId={stat.featureId}
-              featureName={stat.featureName}
-              fsub={`인지 ${stat.awarenessEngineCount}/${stat.awarenessEngineTotal} · 추천 근거 ${stat.placementReasonStatedCount}/${stat.placementTotalValidRuns}`}
-              pillClassName={stat.pill!}
-              pillLabel={GAP_PILL_LABEL[stat.pill!]}
-              defaultOpen={stat.featureId === hero?.featureId}
-            >
-              {renderFeatureDetail(stat)}
-            </GapFeatureRow>
-          ))}
+          <div className="flist">
+            {sorted.map((stat) => (
+              <GapFeatureRow
+                key={stat.featureId}
+                featureId={stat.featureId}
+                featureName={stat.featureName}
+                fsub={`인지 ${stat.awarenessEngineCount}/${stat.awarenessEngineTotal} · 추천 근거 ${stat.placementReasonStatedCount}/${stat.placementTotalValidRuns}`}
+                pillClassName={stat.pill!}
+                pillLabel={GAP_PILL_LABEL[stat.pill!]}
+              />
+            ))}
+          </div>
+
+          <GapFeatureDetailPanel>
+            {sorted.map((stat) => (
+              <div key={stat.featureId} data-feature-id={stat.featureId}>
+                {renderFeatureDetail(stat)}
+              </div>
+            ))}
+          </GapFeatureDetailPanel>
         </GapFeatureList>
       </section>
 
