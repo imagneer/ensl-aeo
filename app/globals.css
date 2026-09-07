@@ -546,6 +546,9 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
    펼치는 아코디언 구조로 바꿨다(brand-position.ts의 qlist와 같은 이유 —
    클라이언트 JS 없이 접근성 기본 동작만으로 해결). .hero/.tip-box/.badge/
    .chev는 이미 전역에 있어서 재사용, 이 화면 전용 클래스만 추가한다. */
+.eyebrow-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.approved-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-success); background: var(--bg-success); padding: 2px 9px; border-radius: 20px; }
+
 .hero .fname { font-size: 28px; font-weight: 500; margin: 0 0 22px; }
 .split { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; margin-bottom: 22px; }
 .split-box { background: var(--surface-2); border-radius: var(--radius); padding: 16px; }
@@ -570,6 +573,11 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 
 .flist { display: flex; flex-direction: column; border-top: 0.5px solid var(--border); }
 .frow { border-bottom: 0.5px solid var(--border); }
+/* 프로토타입의 .frow.selected(클릭한 항목 강조) 복원 — 실제 화면은
+   <details>가 여러 개 동시에 열릴 수 있어서(다중 펼침 유지, 2026-09-08
+   확정), "열림 여부"가 아니라 "가장 최근에 클릭한 항목"을
+   GapFeatureList.tsx의 useState로 따로 추적해 이 클래스를 붙인다. */
+.frow.selected { background: var(--surface-1); margin: 0 -16px; padding-left: 16px; padding-right: 16px; border-radius: var(--radius); border-bottom-color: transparent; }
 .frow-head { padding: 15px 4px; display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; list-style: none; }
 .frow-head::-webkit-details-marker { display: none; }
 .frow-head .fname { font-size: 15px; font-weight: 500; margin: 0 0 4px; }
@@ -592,8 +600,10 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .stat3-card .v { font-size: 20px; font-weight: 500; margin: 0 0 4px; line-height: 1.1; }
 .stat3-card .d { font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.5; }
 
-.why-box { background: var(--surface-1); border-left: 2px solid var(--text-primary); border-radius: 0 var(--radius) var(--radius) 0; padding: 16px 18px; margin-bottom: 18px; }
-.why-box .k { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; }
+.why-box { background: var(--surface-1); border-left: 2px solid var(--text-primary); border-radius: 0 var(--radius) var(--radius) 0; padding: 16px 18px; margin-bottom: 18px; display: grid; grid-template-columns: 1fr 1.3fr; gap: 18px; }
+.why-box.why-box-single { grid-template-columns: 1fr; }
+.why-box .k { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; grid-column: 1 / -1; }
+.why-box .headline { font-size: 15px; font-weight: 500; line-height: 1.55; margin: 0; }
 .why-box ul { margin: 0; padding-left: 16px; }
 .why-box li { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 6px; }
 .why-box li:last-child { margin-bottom: 0; }

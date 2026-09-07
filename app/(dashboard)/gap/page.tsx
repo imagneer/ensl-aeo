@@ -33,6 +33,7 @@ import { MIN_RUNS_FOR_JUDGMENT } from '@/lib/badge-thresholds';
 import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
 import type { KnownBrand } from '@/lib/parser';
 import { GapTipsModal } from '@/components/GapTipsModal';
+import { GapFeatureList, GapFeatureRow } from '@/components/GapFeatureList';
 
 function engineLabel(engine: string): string {
   return ENGINE_CONFIG[engine as EngineName]?.label ?? engine;
@@ -243,13 +244,16 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
               </div>
             </div>
 
-            <div className="why-box">
+            <div className={`why-box${narrative.whyBoxSentences.length < 2 ? ' why-box-single' : ''}`}>
               <p className="k">왜 이렇게 판정했을까?</p>
-              <ul>
-                {narrative.whyBoxSentences.map((s, i) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ul>
+              <p className="headline">{narrative.whyBoxSentences[0]}</p>
+              {narrative.whyBoxSentences.length > 1 && (
+                <ul>
+                  {narrative.whyBoxSentences.slice(1).map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             {competitorExpressions.length > 0 && (
@@ -343,10 +347,15 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
 
   return (
     <>
-      <p className="eyebrow">인지와 위치의 간극</p>
+      <div className="eyebrow-row">
+        <span className="eyebrow">인지와 위치의 간극</span>
+        <span className="approved-badge">✓ 자동 검수 완료</span>
+      </div>
       <h1 className="page-title">알고 있는 특징은 추천 답변까지 이어지고 있을까?</h1>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '-4px 0 20px' }}>
-        AI가 아는 것 중 무엇이 실제 추천 답변에서 근거로 쓰이는지 확인해요.
+        AI가 아는 것 중 무엇이 실제{' '}
+        <strong style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>추천 근거</strong>로 쓰이는지
+        확인해요.
       </p>
       <p className="meta-row">
         <span>
@@ -431,26 +440,21 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
         <h2 className="sec">특징은 어디까지 이어졌을까?</h2>
         <p className="sec-sub">중요한 간극부터 보여드려요. 항목을 누르면 아래 근거가 펼쳐져요.</p>
 
-        <div className="flist">
+        <GapFeatureList defaultSelectedId={hero?.featureId ?? null}>
           {sorted.map((stat) => (
-            <details className="frow" key={stat.featureId} open={stat.featureId === hero?.featureId}>
-              <summary className="frow-head">
-                <div>
-                  <p className="fname">{stat.featureName}</p>
-                  <p className="fsub">
-                    인지 {stat.awarenessEngineCount}/{stat.awarenessEngineTotal} · 추천 근거 {stat.placementReasonStatedCount}/
-                    {stat.placementTotalValidRuns}
-                  </p>
-                </div>
-                <div className="right">
-                  <span className={`pill ${stat.pill}`}>{GAP_PILL_LABEL[stat.pill!]}</span>
-                  <span className="chev">▾</span>
-                </div>
-              </summary>
+            <GapFeatureRow
+              key={stat.featureId}
+              featureId={stat.featureId}
+              featureName={stat.featureName}
+              fsub={`인지 ${stat.awarenessEngineCount}/${stat.awarenessEngineTotal} · 추천 근거 ${stat.placementReasonStatedCount}/${stat.placementTotalValidRuns}`}
+              pillClassName={stat.pill!}
+              pillLabel={GAP_PILL_LABEL[stat.pill!]}
+              defaultOpen={stat.featureId === hero?.featureId}
+            >
               {renderFeatureDetail(stat)}
-            </details>
+            </GapFeatureRow>
           ))}
-        </div>
+        </GapFeatureList>
       </section>
 
       {heroSentence && (
