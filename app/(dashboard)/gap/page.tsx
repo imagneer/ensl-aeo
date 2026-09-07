@@ -29,7 +29,11 @@ import {
   GAP_PILL_LABEL,
   type FeatureGapStat,
 } from '@/lib/gap';
-import { MIN_RUNS_FOR_JUDGMENT } from '@/lib/badge-thresholds';
+import {
+  MIN_RUNS_FOR_JUDGMENT,
+  classifyObservationConfidence,
+  OBSERVATION_CONFIDENCE_LABEL,
+} from '@/lib/badge-thresholds';
 import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
 import type { KnownBrand } from '@/lib/parser';
 import { GapTipsModal } from '@/components/GapTipsModal';
@@ -238,9 +242,15 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
                 <p className="d">추천 근거로 확인 {stat.placementReasonStatedCount}건</p>
               </div>
               <div className="stat3-card">
-                <p className="k">판정 방식</p>
-                <p className="v">자동 검수 완료</p>
-                <p className="d">Haiku 판정 · Sonnet 독립 재검수</p>
+                <p className="k">판정 신뢰도</p>
+                <p className="v">
+                  {OBSERVATION_CONFIDENCE_LABEL[
+                    classifyObservationConfidence(stat.placementReasonStatedCount + stat.placementCoMentionedCount)
+                  ]}
+                </p>
+                <p className="d">
+                  자리 질문 답변 {stat.placementReasonStatedCount + stat.placementCoMentionedCount}건 관측 기준
+                </p>
               </div>
             </div>
 
@@ -263,6 +273,7 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
                     <p className="expr-eyebrow">다른 브랜드 답변에서 반복된 표현</p>
                     <p className="expr-title">이 특징, 다른 브랜드 답변에서 반복된 표현</p>
                   </div>
+                  <span className="expr-meta">{stat.placementTotalValidRuns}개 유효 답변</span>
                 </div>
                 <div className="expr-list">
                   {competitorExpressions.map((e, i) => (

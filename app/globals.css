@@ -590,7 +590,7 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .pill.condition { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); }
 .pill.insufficient { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); }
 
-.detail-panel { padding: 22px 4px 4px; }
+.detail-panel { border: 0.5px solid var(--border-strong); border-radius: 12px; padding: 24px; margin-top: 24px; }
 .dp-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .dp-eyebrow { font-size: 11px; color: var(--text-muted); margin: 0 0 4px; }
 .dp-name { font-size: 18px; font-weight: 500; margin: 0; }

@@ -45,3 +45,35 @@ export function classifyExposureBadge(
   if (visibilityRate > 0) return 'sometimes';
   return 'none';
 }
+
+/**
+ * 간극 화면(Day22) "판정 신뢰도" — 관측량(observationCount) 기반 판정.
+ * 프로토타입 원본은 "사람 검토 완료 여부"로 신뢰도를 표시했는데, 그건
+ * 내부 승인 화면(9/11 데모 범위 밖)이 있어야 성립해서 못 쓴다. 대신 그
+ * 특징이 자리질문 답변에 실제로 등장한 횟수(reason_stated+co_mentioned
+ * 합계 — mention_feature_roles/lib/gap.ts의 관측 10회 게이팅과 같은
+ * 값)로 판정한다(2026-09-08 루아 확정).
+ *
+ * ⚠️ 구간 값은 코난 제안(2026-09-08) — 새 숫자를 지어내지 않고
+ * MIN_RUNS_FOR_JUDGMENT(10)의 배수로 잡았다: 10~19(1~2배)=낮음,
+ * 20~39(2~4배)=보통, 40 이상(4배+)=높음. 현재 데이터(문구 생성 대상 7개
+ * 특징, 관측 16~61건 분포) 기준으로 낮음 1개·보통 4개·높음 2개로 갈림 —
+ * 루아 확인 후 확정.
+ */
+export type ObservationConfidence = 'high' | 'medium' | 'low';
+
+export const OBSERVATION_CONFIDENCE_LOW_MAX = MIN_RUNS_FOR_JUDGMENT * 2; // < 20
+export const OBSERVATION_CONFIDENCE_MEDIUM_MAX = MIN_RUNS_FOR_JUDGMENT * 4; // < 40
+
+export const OBSERVATION_CONFIDENCE_LABEL: Record<ObservationConfidence, string> = {
+  high: '높음',
+  medium: '보통',
+  low: '낮음',
+};
+
+/** @param observationCount 그 특징의 reason_stated+co_mentioned 합계. MIN_RUNS_FOR_JUDGMENT 미만이면 애초에 이 함수를 호출할 일이 없다(화면 자체가 안 뜸). */
+export function classifyObservationConfidence(observationCount: number): ObservationConfidence {
+  if (observationCount < OBSERVATION_CONFIDENCE_LOW_MAX) return 'low';
+  if (observationCount < OBSERVATION_CONFIDENCE_MEDIUM_MAX) return 'medium';
+  return 'high';
+}
