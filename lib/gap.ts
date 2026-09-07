@@ -44,7 +44,7 @@ import type {
   MentionFeatureRoleRow,
   QuerySnapshotRecord,
 } from './supabase';
-import { classifyExposureBadge, type ExposureBadge } from './badge-thresholds';
+import { classifyExposureBadge, MIN_RUNS_FOR_JUDGMENT, type ExposureBadge } from './badge-thresholds';
 import { computeAppearanceHeaderStats } from './query-detail';
 import { combineTopKeywords } from './brand-position';
 
@@ -151,15 +151,34 @@ export function visibleGapFeatures(stats: FeatureGapStat[]): FeatureGapStat[] {
 }
 
 /**
- * Hero(가장 큰 간극) 선정 — pill='gap'인 것 중 gapSize가 가장 큰 특징 하나.
- * '조건 정보'(지역 맥락)는 애초에 "간극" 개념이 성립 안 해서 후보에서 뺀다
- * (작업지시서 §3-2가 예시로 든 "전문의 협진: 인지 높음·자리 근거 0" 패턴과
- * 일치 — pill='gap'이 정확히 이 패턴을 가리킨다).
+ * Hero(가장 큰 간극) 선정 — pill='gap'인 것 중 placementCoMentionedCount가
+ * 가장 큰 특징 하나. '조건 정보'(지역 맥락)는 애초에 "간극" 개념이 성립
+ * 안 해서 후보에서 뺀다(pill='gap'이 정확히 그 패턴만 가리킨다).
+ *
+ * ⚠️ 2026-09-08 발견·수정 — 원래는 gapSize(awarenessRatio -
+ * placementReasonStatedRatio) 기준이었다. 그런데
+ * placementReasonStatedRatio의 분모가 전역 유효관측(모든 특징이 공유하는
+ * 값, 지금 370)이라 어떤 특징이든 이 항이 거의 항상 0에 가깝게 수렴한다
+ * — 그래서 사실상 gapSize ≈ awarenessRatio가 되어버려, hero가 "가장
+ * 뾰족한 간극"이 아니라 "인지도가 가장 높은데 근거가 0인 특징"을 뽑고
+ * 있었다(루아 판단 — "다양한 치과 진료 제공" 같은 포괄적 특징이 인지도만
+ * 높다는 이유로 hero가 됨). placementCoMentionedCount(그 특징이 자리질문
+ * 답변에 실제로 얼마나 자주 나오는지)로 바꾸면 "등장은 자주 하는데 한
+ * 번도 근거로 안 묶이는" 정도를 직접 재게 된다.
+ *
+ * MIN_RUNS_FOR_JUDGMENT(badge-thresholds.ts, 기존 상수 재사용) 미만인
+ * 후보는 노이즈로 보고 건너뛴다 — 등장 자체가 적어서 "간극"이라 부를
+ * 근거가 약한 특징이 우연히 hero가 되는 걸 막는다. 전부 미달이면 hero
+ * 없음(null) — 없는 뾰족함을 억지로 만들지 않는다.
+ *
+ * gapSize 필드 자체와 sortForFeatureList(화면 목록 정렬)는 이번엔
+ * 안 건드린다 — hero 선정 로직만 분리해서 고치기로 확정(2026-09-08).
  */
 export function selectGapHero(stats: FeatureGapStat[]): FeatureGapStat | null {
-  const candidates = stats.filter((s) => s.pill === 'gap');
-  if (candidates.length === 0) return null;
-  return candidates.reduce((best, cur) => (cur.gapSize > best.gapSize ? cur : best));
+  const candidates = stats
+    .filter((s) => s.pill === 'gap' && s.placementCoMentionedCount >= MIN_RUNS_FOR_JUDGMENT)
+    .sort((a, b) => b.placementCoMentionedCount - a.placementCoMentionedCount);
+  return candidates[0] ?? null;
 }
 
 /**
