@@ -4,6 +4,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import {
+  getDiagnosisDisplayState,
+  type DiagnosisDisplayState,
+} from './diagnosis-display-state';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -1817,6 +1821,34 @@ export async function fetchCurrentReviewItemsForDiagnosis(
   return Array.from(latestBySource.values());
 }
 
+/**
+ * 헤더 라벨용(지시서 §5-1) — 이 진단에 달린 모든 item_type의 "현재(최신 회차)"
+ * 상태만 모아준다. 헤더는 문장 단위가 아니라 진단 단위라서, 어느 문장이든
+ * 하나라도 검토가 안 끝났으면 "검토 중"으로 표시해야 하기 때문.
+ */
+export async function fetchCurrentReviewItemStatuses(
+  diagnosisId: string,
+  client: SupabaseClient
+): Promise<ReviewItemStatus[]> {
+  const { data, error } = await client
+    .from('review_items')
+    .select('source_table, source_id, status, generation_round')
+    .eq('diagnosis_id', diagnosisId)
+    .order('generation_round', { ascending: false });
+
+  if (error) {
+    console.error('review_items 상태 목록 조회 실패:', error);
+    return [];
+  }
+
+  const latestBySource = new Map<string, ReviewItemStatus>();
+  for (const row of data ?? []) {
+    const key = `${row.source_table}:${row.source_id}`;
+    if (!latestBySource.has(key)) latestBySource.set(key, row.status as ReviewItemStatus);
+  }
+  return Array.from(latestBySource.values());
+}
+
 /** editor/viewer 화면 게이팅용 — 승인된 최종문 또는 null. 한 진단에 항목이
  *  하나뿐인 타입(brand_one_liner, brand_one_liner_conflict) 전용이다.
  *  feature_conflict_summary처럼 여러 건인 타입은 fetchCurrentReviewItemsForDiagnosis를
@@ -1843,19 +1875,40 @@ function extractBrandName(row: { brands: { name: string } | { name: string }[] |
 
 /** /review 화면 대기 목록(§3) — 브랜드별 그룹은 화면에서 하고, 여기선
  *  오래된 순 전체 목록만 돌려준다. owner/admin 전용 화면이 쓴다(RLS는
- *  supabaseAdmin이라 role 체크는 호출부/페이지에서 이미 끝났다고 가정). */
+ *  supabaseAdmin이라 role 체크는 호출부/페이지에서 이미 끝났다고 가정).
+ *
+ *  ⚠️ pending뿐 아니라 "수동 처리 필요"(회차 상한 초과로 rejected인 채 후속
+ *  재생성이 없는 항목)도 같이 돌려준다 — 사람이 손대야 하는 항목인데 이력
+ *  탭에만 있으면 놓치기 때문(§3-1). 화면이 맨 위에 고정해서 보여준다.
+ *  반려됐지만 재생성 행이 뒤따르는 항목은 여기 안 들어온다(그 항목의 현재
+ *  상태는 새로 생긴 pending 행이므로). */
 export async function fetchPendingReviewItems(): Promise<PendingReviewItemWithBrand[]> {
+  // ⚠️ 상태를 pending/rejected로 미리 거르면 안 된다 — 그러면 "반려됐다가
+  //    나중에 승인된" 원천 행에서 옛 rejected 회차가 최신인 것처럼 보여서
+  //    이미 끝난 항목이 "수동 처리 필요"로 다시 뜬다(2026-09-08 실제로 이렇게
+  //    잘못 짰다가 발견). 전부 가져와서 source별 최신 회차를 먼저 정한 뒤,
+  //    그 최신 회차가 pending/rejected인 것만 남긴다.
   const { data, error } = await supabaseAdmin
     .from('review_items')
     .select(`${REVIEW_ITEM_COLUMNS}, brands(name)`)
-    .eq('status', 'pending')
     .order('created_at', { ascending: true });
 
   if (error) {
     console.error('대기 중 review_items 조회 실패:', error);
     return [];
   }
-  return (data ?? []).map((row) => ({ ...mapReviewItemRow(row), brandName: extractBrandName(row) }));
+
+  const rows = (data ?? []).map((row) => ({ ...mapReviewItemRow(row), brandName: extractBrandName(row) }));
+
+  const latestBySource = new Map<string, PendingReviewItemWithBrand>();
+  for (const row of rows) {
+    const key = `${row.sourceTable}:${row.sourceId}`;
+    const prev = latestBySource.get(key);
+    if (!prev || row.generationRound > prev.generationRound) latestBySource.set(key, row);
+  }
+  return Array.from(latestBySource.values()).filter(
+    (r) => r.status === 'pending' || r.status === 'rejected'
+  );
 }
 
 /** 이력 탭(§3) — 승인·반려 완료 목록, 최신순. */
@@ -2634,16 +2687,21 @@ export type BrandOneLinerMain =
       /** ⚠️ status와 같이 봐야 함 — '초기한줄'일 때는 확정된 브랜드 한 줄이
        *  아니다(BrandOneLinerToSave 위 주석 참고). 그대로 표시는 해도 되지만
        *  "완성된 한 줄"인 것처럼 다른 곳에 재인용하지 말 것. */
+      /** ⚠️ 2026-09-08부터 editor/viewer는 승인 전이면 여기서 null을 받는다.
+       *  null이라고 "문장이 없다"는 뜻이 아니라 "아직 못 보여준다"는 뜻이므로,
+       *  화면은 displayState를 같이 보고 자리표시자를 그려야 한다
+       *  (getClientPlaceholderText 참고). */
       oneLiner: string | null;
       /** brand_feature_candidates.id 목록(최대 3, category≠'지역_조건').
        *  실제 특징 데이터는 fetchBrandFeatureCandidatesForDiagnosis로
        *  diagnosis.id 기준 한 번에 불러와서 이 id들로 매칭한다(v1.2). */
       selectedFeatureIds: string[];
       locationContextId: string | null;
-      /** owner/admin에게만 의미 있는 플래그 — editor/viewer는 이 값이 false인
-       *  콘텐츠 자체를 절대 못 받으므로(항상 '진단중'으로 폴백), 여기까지
-       *  왔다는 건 owner/admin이거나 이미 검토된 콘텐츠라는 뜻. */
-      reviewed: boolean;
+      /** 이 문장(브랜드 한 줄)의 표시 상태(지시서 §5-1). 관측 층은 이 값과
+       *  무관하게 항상 표시한다 — 이 값은 "문장 자리에 무엇을 그릴지"만 결정한다. */
+      displayState: DiagnosisDisplayState;
+      /** 승인 시각(상태 4에서 "사람 검토 완료 · {날짜}" 표시용). 미승인이면 null. */
+      reviewedAt: string | null;
       questionIds: string[];
       engineList: string[];
       /** 팁 박스(Day21) — null이면 화면이 일반 팁 풀에서 랜덤으로 고른다. */
@@ -2667,11 +2725,14 @@ export interface BrandOneLinerView {
  * 당장 안 지우지만 여기선 더 이상 읽지 않는다 — 값이 있어도 화면 동작에
  * 영향 없는 죽은 컬럼이니 헷갈리지 말 것.
  *
- * viewerRole이 'editor'|'viewer'면 review_items가 'approved'가 아닌
- * 콘텐츠는 존재 자체를 숨긴다(그런 콘텐츠가 있다는 사실도 안 알려준다 —
- * "검토 대기 배지"조차 안 보여주고 그냥 '진단중'과 구분 안 되게 만든다).
- * owner/admin은 검토 여부와 무관하게 항상 다 보고, reviewed 플래그로
- * "아직 검토 전"임을 알 수 있다.
+ * 역할별 노출 규칙(2026-09-08 지시서 §5-1로 갱신):
+ *   - **브랜드 한 줄(main)**: editor/viewer는 승인된 final_text만 받고,
+ *     미승인이면 oneLiner=null + displayState로 "분석 검토 중" 자리표시자를
+ *     그리게 한다. 관측 층(특징 목록·AI 일치도)은 가리지 않는다.
+ *     owner/admin은 초안(ai_text)을 그대로 받는다.
+ *   - **잘못된인지(conflicting)**: 여기만 Day20 규칙 유지 — 미승인이면
+ *     editor/viewer에겐 존재 자체를 숨긴다(자리표시자조차 안 띄움).
+ *     "우리 브랜드에 이런 오해가 있다"는 힌트를 검토 전에 주면 안 되기 때문.
  *
  * ⚠️ '근거부족'(oneLiner=null)은 예외 — 검증할 문장 자체가 없어서
  * review_items 행이 안 생긴다(§1 원칙 2: 관측 층/문장 없음은 검증 대상
@@ -2756,13 +2817,28 @@ export async function fetchLatestBrandOneLiner(
   if (!mainRow) {
     // completed인데 brand_one_liners 행 자체가 없음 — 합성 실패 상황 대비 방어적 처리
     main = { state: '진단중', daysElapsed: daysElapsedSince(diagnosis.startedAt) };
-  } else if (mainRow.status !== '근거부족' && isRestrictedRole && mainReview?.status !== 'approved') {
-    main = { state: '진단중', daysElapsed: daysElapsedSince(diagnosis.startedAt) };
   } else {
+    // 2026-09-08(지시서 §5-1) — 예전엔 editor/viewer를 통째로 '진단중'으로
+    // 되돌렸는데, 그러면 문장뿐 아니라 관측 층(특징 목록·AI 일치도)까지 다
+    // 가려지고 "관측 8일째" 같은 사실과 다른 문구가 떴다. 이제 화면 상태는
+    // 진단 상태만으로 정하고, 역할에 따른 가림은 문장(oneLiner)에만 적용한다.
+    //
+    // ⚠️ '근거부족'은 검증할 문장 자체가 없는 "최종 결과"지 대기 상태가
+    // 아니므로 검토 완료(reviewed)로 취급한다 — 안 그러면 클라이언트에게
+    // 영원히 "분석 검토 중"으로 보인다.
+    const displayState: DiagnosisDisplayState =
+      mainRow.status === '근거부족'
+        ? 'reviewed'
+        : getDiagnosisDisplayState(diagnosis.status, mainReview?.status ?? null);
+
+    const approvedText = mainReview?.status === 'approved' ? mainReview.finalText : null;
     const displayOneLiner =
       mainRow.status === '근거부족'
         ? null
-        : (mainReview?.status === 'approved' ? mainReview.finalText : mainReview?.aiText) ?? mainRow.oneLiner;
+        : isRestrictedRole
+          ? approvedText // 클라이언트: 승인된 최종문만, 없으면 null(자리표시자로 대체됨)
+          : (approvedText ?? mainReview?.aiText ?? mainRow.oneLiner); // owner/admin: 초안도 그대로
+
     main = {
       state: '완료',
       diagnosis: { id: diagnosis.id, startedAt: diagnosis.startedAt, endedAt: diagnosis.endedAt },
@@ -2770,7 +2846,8 @@ export async function fetchLatestBrandOneLiner(
       oneLiner: displayOneLiner,
       selectedFeatureIds: mainRow.selectedFeatureIds ?? [],
       locationContextId: mainRow.locationContextId,
-      reviewed: mainRow.status === '근거부족' ? true : mainReview?.status === 'approved',
+      displayState,
+      reviewedAt: mainReview?.status === 'approved' ? mainReview.reviewedAt : null,
       questionIds: mainRow.questionIds,
       engineList: mainRow.engineList,
       tipContent: mainRow.tipContent,

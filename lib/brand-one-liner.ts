@@ -46,6 +46,7 @@
 
 import { ANTHROPIC_API_URL, ANTHROPIC_MODEL_SONNET, ANTHROPIC_VERSION } from './llm-config';
 import { logLlmCallSuccess, logLlmCallFailure } from './llm-usage';
+import { MAX_GENERATION_ROUNDS } from './diagnosis-display-state';
 
 /**
  * 이 파일 5개 LLM 호출 함수(groupSimilarExpressions/writeOneLiner/
@@ -1357,7 +1358,7 @@ export async function handleReviewItemRejection(
 
   await rejectReviewItem(itemId, reasonCategory, reviewerNote, reviewerId);
 
-  if (!item.autoRegeneratable || item.generationRound >= 3) {
+  if (!item.autoRegeneratable || item.generationRound >= MAX_GENERATION_ROUNDS) {
     return { regenerated: false };
   }
 

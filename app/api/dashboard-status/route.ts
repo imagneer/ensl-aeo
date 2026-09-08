@@ -7,8 +7,14 @@ import {
   fetchTargetBrands,
   fetchDiagnosesForBrand,
   fetchLastSuccessfulSnapshotAt,
+  fetchCurrentReviewItemStatuses,
 } from '@/lib/supabase';
 import { todayKST } from '@/lib/aggregator';
+import {
+  getDiagnosisDisplayState,
+  aggregateHeaderState,
+  getDiagnosisHeaderLabel,
+} from '@/lib/diagnosis-display-state';
 
 /**
  * 상단바(Day21, "진단 N일차 · 7일 중" / "HH:MM 기준 업데이트")용 API 라우트.
@@ -52,7 +58,16 @@ export async function GET(request: Request) {
   const now = new Date(`${todayKstStr}T00:00:00Z`);
   const daysElapsed = Math.round((now.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
   const dayCount = Math.min(Math.max(daysElapsed, 1), 7);
-  const dayLabel = `진단 ${dayCount}일차 · 7일 중`;
+
+  // 2026-09-08(지시서 §5-1) — 예전엔 진단이 끝났는데도 "진단 7일차 · 7일 중"이
+  // 계속 떴다. 헤더는 진단 단위 상태를 따르고, 완료된 진단엔 "N일차" 문구를
+  // 아예 쓰지 않는다. 어느 문장이든 하나라도 검토 전이면 "검토 중"으로 본다.
+  const itemStatuses = await fetchCurrentReviewItemStatuses(latest.id, sessionClient);
+  const headerState = aggregateHeaderState(
+    latest.status,
+    itemStatuses.map((s) => getDiagnosisDisplayState(latest.status, s))
+  );
+  const dayLabel = getDiagnosisHeaderLabel(headerState, dayCount);
 
   const lastSuccessAt = await fetchLastSuccessfulSnapshotAt(brandId, sessionClient);
   const updatedLabel = lastSuccessAt

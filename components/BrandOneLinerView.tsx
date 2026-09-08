@@ -4,8 +4,15 @@ import type {
   EvidenceItem,
   StoredBrandFeatureCandidate,
 } from '@/lib/supabase';
+import { getClientPlaceholderText } from '@/lib/diagnosis-display-state';
 import { BrandOneLinerFeatureCard } from './BrandOneLinerFeatureCard';
 import { HeadlineEvidenceToggle } from './HeadlineEvidenceToggle';
+
+/** "사람 검토 완료 · 9월 8일" 배지용. reviewed_at은 UTC ISO라 KST로 바꿔서 표시한다. */
+function formatReviewedAt(isoUtc: string): string {
+  const d = new Date(isoUtc);
+  return d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' });
+}
 
 /**
  * tier(v1.2)를 화면 문구·스타일로 바꾸는 판단 — 카드 컴포넌트가 아니라
@@ -144,11 +151,14 @@ export function BrandOneLinerView({
         </div>
       )}
 
+      {/* 상태 1(수집 중)만 이 UI를 쓴다 — 완료된 진단에는 절대 안 뜬다(지시서 §5-1).
+          일수는 7에서 멈춘다: 수집이 하루 이틀 밀려도 "8일째 (최소 3일 필요)" 같은
+          자기모순 문구가 나오지 않게. */}
       {view.main.state === '진단중' && (
         <EmptyState
           icon="ti-loader-2"
           text="AI가 아직 관측 중이에요."
-          sub={`인지 질문 관측 ${view.main.daysElapsed ?? '?'}일째 (최소 3일 필요)`}
+          sub={`인지 질문 관측 ${Math.min(view.main.daysElapsed ?? 1, 7)}일째 (최소 3일 필요)`}
         />
       )}
 
@@ -168,26 +178,45 @@ export function BrandOneLinerView({
               ? 'AI가 기억하는 우리 브랜드의 한 줄'
               : '지금까지 AI가 가장 강하게 연결한 특징'}
           </p>
-          <p className="headline-sentence">
-            {view.main.status === '반복확인' ? `"${view.main.oneLiner}"` : view.main.oneLiner}
-          </p>
+          {/* 문장을 못 보여주는 상태(클라이언트 + 미승인)에서는 문장 자리만
+              자리표시자로 바꾼다 — 아래 관측 층(특징 목록·AI 일치도)은 그대로
+              노출된다(지시서 §5-1). 문장에 딸린 배지("반복 확인됨" 등)도 같이
+              감춘다: 못 보는 문장에 대해 확신 수준만 말하면 오히려 혼란스럽다. */}
+          {view.main.oneLiner ? (
+            <p className="headline-sentence">
+              {view.main.status === '반복확인' ? `"${view.main.oneLiner}"` : view.main.oneLiner}
+            </p>
+          ) : (
+            <p className="headline-sentence" style={{ color: 'var(--text-secondary)' }}>
+              {getClientPlaceholderText(view.main.displayState) ?? '분석 검토 중'}
+            </p>
+          )}
           <div className="badge-row">
-            {view.main.status === '반복확인' ? (
+            {view.main.oneLiner &&
+              (view.main.status === '반복확인' ? (
+                <span className="conf-badge confirmed">
+                  <i className="ti ti-check" />
+                  반복 확인됨
+                </span>
+              ) : (
+                <span className="conf-badge possible">
+                  <i className="ti ti-hourglass-low" />
+                  아직 확정 아님
+                </span>
+              ))}
+            {view.main.displayState === 'reviewed' && view.main.reviewedAt && (
               <span className="conf-badge confirmed">
-                <i className="ti ti-check" />
-                반복 확인됨
-              </span>
-            ) : (
-              <span className="conf-badge possible">
-                <i className="ti ti-hourglass-low" />
-                아직 확정 아님
+                <i className="ti ti-user-check" />
+                사람 검토 완료 · {formatReviewedAt(view.main.reviewedAt)}
               </span>
             )}
-            {!view.main.reviewed && (
+            {/* owner/admin만 여기 도달한다 — 클라이언트는 미승인이면 oneLiner가 null이라
+                위 자리표시자 분기로 빠진다. */}
+            {view.main.oneLiner && view.main.displayState !== 'reviewed' && (
               <>
                 <span className="conf-badge pending">
                   <i className="ti ti-eye" />
-                  검토 대기
+                  {view.main.displayState === 'manualNeeded' ? '수동 처리 필요' : '검토 대기'}
                 </span>
                 <Link href="/review" style={{ fontSize: 12 }}>
                   검토하러 가기
