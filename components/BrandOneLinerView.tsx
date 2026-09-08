@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type {
   BrandOneLinerView as BrandOneLinerViewData,
   EvidenceItem,
@@ -131,6 +132,15 @@ export function BrandOneLinerView({
             잘못된 인지
           </p>
           <p className="cb-sentence">{view.conflicting.oneLiner}</p>
+          {!view.conflicting.reviewed && (
+            <p className="note" style={{ margin: '8px 0 0' }}>
+              <span className="conf-badge pending">
+                <i className="ti ti-eye" />
+                검토 대기
+              </span>{' '}
+              <Link href="/review">검토하러 가기</Link>
+            </p>
+          )}
         </div>
       )}
 
@@ -174,10 +184,15 @@ export function BrandOneLinerView({
               </span>
             )}
             {!view.main.reviewed && (
-              <span className="conf-badge pending">
-                <i className="ti ti-eye" />
-                검토 대기
-              </span>
+              <>
+                <span className="conf-badge pending">
+                  <i className="ti ti-eye" />
+                  검토 대기
+                </span>
+                <Link href="/review" style={{ fontSize: 12 }}>
+                  검토하러 가기
+                </Link>
+              </>
             )}
             {view.main.status === '반복확인' && (
               <HeadlineEvidenceToggle>

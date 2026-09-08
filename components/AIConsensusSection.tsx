@@ -5,6 +5,7 @@
  * detectAndSaveFeatureConflicts)에서 이미 끝났다 — 이 컴포넌트는 다듬어진
  * 결과를 그대로 그리기만 한다.
  */
+import Link from 'next/link';
 
 export interface ConsensusItem {
   id: string;
@@ -18,6 +19,9 @@ export interface ConsensusItem {
 export interface ResolvedFeatureConflict {
   id: string;
   summary: string;
+  /** false면 owner/admin에게만 보이는 항목(§5) — "검토 대기" 배지 표시용.
+   *  editor/viewer는 이 값이 false인 항목 자체를 애초에 못 받는다(호출부에서 필터됨). */
+  reviewed: boolean;
   featureA: { label: string; engineLabel: string | null; sourceSentence: string | null };
   featureB: { label: string; engineLabel: string | null; sourceSentence: string | null };
 }
@@ -113,6 +117,15 @@ export function AIConsensusSection({
                   </span>
                 </p>
                 <p className="ci-note">{c.summary}</p>
+                {!c.reviewed && (
+                  <p className="ci-note">
+                    <span className="conf-badge pending">
+                      <i className="ti ti-eye" />
+                      검토 대기
+                    </span>{' '}
+                    <Link href="/review">검토하러 가기</Link>
+                  </p>
+                )}
               </div>
             ))
           )}

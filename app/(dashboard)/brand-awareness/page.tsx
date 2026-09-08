@@ -8,6 +8,7 @@ import {
   fetchBrandExpressionsByIds,
   fetchBrandFeatureCandidatesForDiagnosis,
   fetchBrandFeatureConflictsForDiagnosis,
+  fetchCurrentReviewItemsForDiagnosis,
   groupCandidatesByConsensus,
   fetchQuestionEvidenceSummary,
   fetchActiveQueries,
@@ -142,21 +143,40 @@ export default async function BrandAwarenessPage({
   // 3번 칸(서로 다르게 설명하는 지점) — brand_feature_conflicts는 후보의
   // id 참조만 갖고 있어서, 위에서 이미 불러온 allCandidates/evidence로 라벨과
   // 대표 근거 문장을 붙여 화면에 바로 그릴 수 있는 형태로 만든다.
+  const isRestrictedRole = account.role === 'editor' || account.role === 'viewer';
   const conflictRows =
     view.main.state === '완료'
       ? await fetchBrandFeatureConflictsForDiagnosis(view.main.diagnosis.id, sessionClient)
       : [];
+  // 사람 검증 인프라(2026-09-08) — 이 요약 문장은 conflict_summary 컬럼이
+  // 아니라 review_items가 단일 출처다(brand_one_liner와 같은 이유:
+  // 반려→재생성된 최신 문구는 원본 컬럼엔 안 남고 review_items에만 있음).
+  const conflictReviewItems =
+    view.main.state === '완료'
+      ? await fetchCurrentReviewItemsForDiagnosis(view.main.diagnosis.id, 'feature_conflict_summary', sessionClient)
+      : [];
+  const conflictReviewBySourceId = new Map(conflictReviewItems.map((r) => [r.sourceId, r]));
   const candidateById = new Map(allCandidates.map((c) => [c.id, c]));
   const resolvedConflicts: ResolvedFeatureConflict[] = conflictRows
     .map((row): ResolvedFeatureConflict | null => {
       const a = candidateById.get(row.featureAId);
       const b = candidateById.get(row.featureBId);
       if (!a || !b) return null; // 참조 무결성이 깨진 경우 조용히 스킵(방어적)
+
+      const review = conflictReviewBySourceId.get(row.id) ?? null;
+      const approved = review?.status === 'approved';
+      // editor/viewer는 미검토 콘텐츠 존재 자체를 숨긴다(브랜드 한 줄과 동일 규칙, §5)
+      if (isRestrictedRole && !approved) return null;
+      const summary = approved
+        ? (review?.finalText ?? row.conflictSummary)
+        : (review?.aiText ?? row.conflictSummary);
+
       const aEvidence = evidenceFor(a.evidenceExpressionIds)[0] ?? null;
       const bEvidence = evidenceFor(b.evidenceExpressionIds)[0] ?? null;
       return {
         id: row.id,
-        summary: row.conflictSummary,
+        summary,
+        reviewed: approved,
         featureA: {
           label: a.featureName,
           engineLabel: aEvidence ? engineLabel(aEvidence.engine) : null,

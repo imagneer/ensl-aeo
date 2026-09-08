@@ -88,6 +88,19 @@ import {
   saveBrandFeatureCandidates,
   saveBrandFeatureConflicts,
   deleteBrandOneLinerArtifacts,
+  saveReviewItem,
+  fetchReviewItemById,
+  rejectReviewItem,
+  fetchBrandOneLinerRefsById,
+  fetchBrandFeatureConflictById,
+  fetchBrandFeatureCandidatesForDiagnosis,
+  fetchBrandExpressionsByIds,
+  fetchBrandNameById,
+  supabaseAdmin,
+  type StoredBrandFeatureCandidate,
+  type ReviewItemType,
+  type ReviewReasonCategory,
+  type StoredReviewItem,
 } from './supabase';
 import { kstDayBoundsUtc } from './aggregator';
 import { ENGINE_NAMES, ENGINE_CONFIG, type EngineName } from './engine-config';
@@ -359,6 +372,27 @@ interface CandidateWithId {
   candidateId: string;
 }
 
+/**
+ * writeOneLiner/reviewOneLiner가 실제로 쓰는 건 특징 이름과 근거 문장뿐이다
+ * (EvaluatedGroup 전체가 필요한 게 아님). 사람 검증 인프라(2026-09-08)의
+ * 반려→재생성 경로는 진단 직후 메모리에 있던 EvaluatedGroup이 없고 DB에서
+ * brand_feature_candidates만 다시 읽어오므로, 이 좁은 입력 타입으로 분리해야
+ * 두 경로(최초 합성/반려 재생성)가 같은 함수를 공유할 수 있다.
+ */
+export interface OneLinerFeatureInput {
+  candidateId: string;
+  label: string;
+  sourceSentences: string[];
+}
+
+function toFeatureInput(c: CandidateWithId): OneLinerFeatureInput {
+  return {
+    candidateId: c.candidateId,
+    label: c.group.label,
+    sourceSentences: c.group.members.map((m) => m.sourceSentence),
+  };
+}
+
 async function saveAllCandidates(
   diagnosisId: string,
   brandId: string,
@@ -457,23 +491,37 @@ function findConflictingFeature(candidates: CandidateWithId[]): CandidateWithId 
 
 // ── 6단계: 문장 작성 (LLM, Sonnet) ──
 
+/** 사람 검증 인프라(2026-09-08) 반려 재생성 때만 채워진다 — §4 "프롬프트에
+ *  검토자 반려 사유를 제약 조건으로 주입". 최초 합성 경로는 항상 null. */
+export interface RejectionContext {
+  reasonCategory: string;
+  note: string | null;
+}
+
+function buildRejectionBlock(rejection: RejectionContext | null): string {
+  if (!rejection) return '';
+  const noteBlock = rejection.note ? ` — "${rejection.note}"` : '';
+  return `\n\n⚠️ 이전 작성이 사람 검토에서 반려됐다. 반려 사유: ${rejection.reasonCategory}${noteBlock}. 이 사유를 반드시 반영해서 다시 써라 — 같은 문제를 반복하면 안 된다.`;
+}
+
 function buildWritingPrompt(
   brandName: string,
-  features: CandidateWithId[],
-  locationContext: CandidateWithId | null
+  features: OneLinerFeatureInput[],
+  locationContext: OneLinerFeatureInput | null,
+  rejection: RejectionContext | null = null
 ): string {
   const featureBlocks = features
     .map((c, i) => {
-      const examples = c.group.members
+      const examples = c.sourceSentences
         .slice(0, 3)
-        .map((m) => `    · "${m.sourceSentence}"`)
+        .map((s) => `    · "${s}"`)
         .join('\n');
-      return `${i + 1}. ${c.group.label}\n${examples}`;
+      return `${i + 1}. ${c.label}\n${examples}`;
     })
     .join('\n');
 
   const locationBlock = locationContext
-    ? `\n\n지역/조건 맥락(문장에 특징으로 나열하지 말고, 자연스러운 문맥으로만 녹여라): ${locationContext.group.label}`
+    ? `\n\n지역/조건 맥락(문장에 특징으로 나열하지 말고, 자연스러운 문맥으로만 녹여라): ${locationContext.label}`
     : '';
 
   return `"${brandName}"에 대해 AI 답변에서 반복 확인된 특징 ${features.length}개가 아래에 근거 문장과 함께 있다.
@@ -490,13 +538,14 @@ ${featureBlocks}${locationBlock}
 4. 사용자가 한 번에 이해할 수 있는 자연스러운 한국어 문장으로 써라.
 5. 60자 안팎의 한 문장으로 써라.
 6. 위에 선정된 특징만 조합해라 — 그 외 정보를 넣지 마라.
-7. 지역/조건 맥락이 주어졌으면 특징처럼 나열하지 말고 문맥으로만 자연스럽게 녹여 써라(예: "OO구에서 임플란트로 반복 언급됩니다"처럼). 주어지지 않았으면 무시해라.`;
+7. 지역/조건 맥락이 주어졌으면 특징처럼 나열하지 말고 문맥으로만 자연스럽게 녹여 써라(예: "OO구에서 임플란트로 반복 언급됩니다"처럼). 주어지지 않았으면 무시해라.${buildRejectionBlock(rejection)}`;
 }
 
 async function writeOneLiner(
   brandName: string,
-  features: CandidateWithId[],
-  locationContext: CandidateWithId | null
+  features: OneLinerFeatureInput[],
+  locationContext: OneLinerFeatureInput | null,
+  rejection: RejectionContext | null = null
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
@@ -511,7 +560,9 @@ async function writeOneLiner(
     body: JSON.stringify({
       model: ANTHROPIC_MODEL_SONNET,
       max_tokens: 1024,
-      messages: [{ role: 'user', content: buildWritingPrompt(brandName, features, locationContext) }],
+      messages: [
+        { role: 'user', content: buildWritingPrompt(brandName, features, locationContext, rejection) },
+      ],
       tools: [
         {
           name: 'report_one_liner',
@@ -556,21 +607,21 @@ interface ReviewResult {
 function buildReviewPrompt(
   brandName: string,
   oneLiner: string,
-  features: CandidateWithId[],
-  locationContext: CandidateWithId | null
+  features: OneLinerFeatureInput[],
+  locationContext: OneLinerFeatureInput | null
 ): string {
   const featureBlocks = features
     .map((c, i) => {
-      const examples = c.group.members
+      const examples = c.sourceSentences
         .slice(0, 3)
-        .map((m) => `    · "${m.sourceSentence}"`)
+        .map((s) => `    · "${s}"`)
         .join('\n');
-      return `${i + 1}. ${c.group.label}\n${examples}`;
+      return `${i + 1}. ${c.label}\n${examples}`;
     })
     .join('\n');
 
   const locationBlock = locationContext
-    ? `\n\n지역/조건 맥락(문장에 특징으로 나열되면 안 되고, 문맥으로만 쓰였어야 함): ${locationContext.group.label}`
+    ? `\n\n지역/조건 맥락(문장에 특징으로 나열되면 안 되고, 문맥으로만 쓰였어야 함): ${locationContext.label}`
     : '';
 
   return `아래는 "${brandName}"에 대해 자동 생성된 브랜드 한 줄과, 그 근거로 쓰인 특징들이다. 너는 이 문장을 검수하는 역할이다 — 이 문장을 쓴 사람이 아니라, 이 문장이 규칙을 어겼는지 의심하고 확인하는 감사자다.
@@ -594,8 +645,8 @@ ${featureBlocks}${locationBlock}
 async function reviewOneLiner(
   brandName: string,
   oneLiner: string,
-  features: CandidateWithId[],
-  locationContext: CandidateWithId | null
+  features: OneLinerFeatureInput[],
+  locationContext: OneLinerFeatureInput | null
 ): Promise<ReviewResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
@@ -952,7 +1003,362 @@ async function detectAndSaveFeatureConflicts(
     conflictSummary: c.summary,
   }));
 
-  return saveBrandFeatureConflicts(toSave);
+  const savedIds = await saveBrandFeatureConflicts(toSave);
+
+  // 사람 검증 인프라(2026-09-08) — 이 요약 문장은 위 one_liner 계열과 달리
+  // 진짜 LLM 자유 작성 문장(reviewFeatureConflicts가 다듬은 결과)이라
+  // auto_regeneratable=true — 반려되면 자동 재생성 큐에 들어간다.
+  // saveBrandFeatureConflicts는 saveBrandFeatureCandidates와 같은 순서
+  // 보존 가정을 이미 쓰고 있어서(주석 참고) 여기서도 index로 zip한다.
+  await Promise.allSettled(
+    savedIds.map((id, i) => {
+      const pair = confirmed[i];
+      const a = pool[pair.featureAIndex];
+      const b = pool[pair.featureBIndex];
+      return saveReviewItem({
+        brandId,
+        diagnosisId,
+        itemType: 'feature_conflict_summary',
+        sourceTable: 'brand_feature_conflicts',
+        sourceId: id,
+        aiText: toSave[i].conflictSummary,
+        autoRegeneratable: true,
+        evidence: {
+          featureA: { label: a.group.label, sourceSentences: a.group.members.slice(0, 2).map((m) => m.sourceSentence) },
+          featureB: { label: b.group.label, sourceSentences: b.group.members.slice(0, 2).map((m) => m.sourceSentence) },
+        },
+      });
+    })
+  );
+
+  return savedIds;
+}
+
+// ── 사람 검증 인프라 — 반려 재생성 (작업지시서_사람검증_인프라_2026-09-08 §4) ──
+//
+// review_items.auto_regeneratable=true인 두 종류만 여기서 다시 쓴다:
+//   - brand_one_liner ('반복확인' 상태 — 진짜 LLM 자유 작성 문장)
+//   - feature_conflict_summary (3번 칸 "서로 다르게 설명하는 지점")
+// '초기한줄'/'잘못된인지'는 고정 템플릿이라 auto_regeneratable=false로
+// 저장돼 있고, 여기 오지 않는다(호출부인 handleReviewItemRejection이
+// 먼저 걸러낸다) — 다시 불러도 토씨 하나 안 바뀌는 문장을 재생성 큐에
+// 넣는 게 무의미하기 때문(2026-09-08 코난 제안, 루아 확인).
+
+/** brand_one_liner 재생성 — 원래 선정됐던 특징들(selected_feature_ids/
+ *  location_context_id)을 다시 읽어와 writeOneLiner/reviewOneLiner를
+ *  한 번 더 돌린다. 최초 합성 때와 달리 "특징을 빼고 재시도"는 안 한다 —
+ *  사람이 이미 반려 사유를 줬으니, 그 사유를 프롬프트에 반영하는 것만으로
+ *  충분하다고 보고(2026-09-08), 자동검수 실패 시엔 같은 입력으로 한 번만
+ *  더 시도한다(최초 합성의 "최대 2회"와 같은 상한).
+ */
+async function regenerateOneLinerText(
+  item: StoredReviewItem,
+  brandName: string,
+  rejection: RejectionContext
+): Promise<string | null> {
+  if (!item.sourceId) return null;
+  const refs = await fetchBrandOneLinerRefsById(item.sourceId);
+  if (!refs || !refs.selectedFeatureIds || refs.selectedFeatureIds.length === 0) return null;
+
+  const allCandidates = await fetchBrandFeatureCandidatesForDiagnosis(refs.diagnosisId, supabaseAdmin);
+  const byId = new Map(allCandidates.map((c) => [c.id, c]));
+  const selectedCandidates = refs.selectedFeatureIds
+    .map((id) => byId.get(id))
+    .filter((c): c is StoredBrandFeatureCandidate => !!c);
+  if (selectedCandidates.length === 0) return null;
+  const locationCandidate = refs.locationContextId ? byId.get(refs.locationContextId) ?? null : null;
+
+  const allEvidenceIds = selectedCandidates.flatMap((c) => c.evidenceExpressionIds);
+  if (locationCandidate) allEvidenceIds.push(...locationCandidate.evidenceExpressionIds);
+  const evidenceRows = await fetchBrandExpressionsByIds(allEvidenceIds, supabaseAdmin);
+  const evidenceById = new Map(evidenceRows.map((e) => [e.id, e]));
+
+  function toFeatureInputFromCandidate(c: StoredBrandFeatureCandidate): OneLinerFeatureInput {
+    return {
+      candidateId: c.id,
+      label: c.featureName,
+      sourceSentences: c.evidenceExpressionIds
+        .map((id) => evidenceById.get(id)?.sourceSentence)
+        .filter((s): s is string => !!s),
+    };
+  }
+
+  const featureInputs = selectedCandidates.map(toFeatureInputFromCandidate);
+  const locationInput = locationCandidate ? toFeatureInputFromCandidate(locationCandidate) : null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const draft = await writeOneLiner(brandName, featureInputs, locationInput, rejection);
+    const review = await reviewOneLiner(brandName, draft, featureInputs, locationInput);
+    if (review.passed) return draft;
+    console.error(
+      `브랜드 한 줄 반려 재생성 자동검수 실패 (review_item=${item.id}, attempt=${attempt}): ${review.reason ?? '사유 미상'}`
+    );
+  }
+  return null;
+}
+
+function buildConflictRewritePrompt(
+  brandName: string,
+  labelA: string,
+  examplesA: string[],
+  labelB: string,
+  examplesB: string[],
+  previousSummary: string,
+  rejection: RejectionContext
+): string {
+  const exA = examplesA
+    .slice(0, 3)
+    .map((s) => `    · "${s}"`)
+    .join('\n');
+  const exB = examplesB
+    .slice(0, 3)
+    .map((s) => `    · "${s}"`)
+    .join('\n');
+  const noteBlock = rejection.note ? ` — "${rejection.note}"` : '';
+
+  return `"${brandName}"에 대해 AI들이 서로 다르게 설명하는 특징 두 가지가 있다.
+
+A. ${labelA}
+${exA}
+
+B. ${labelB}
+${exB}
+
+이전에 이 대립을 요약한 문장(사람 검토에서 반려됨): "${previousSummary}"
+반려 사유: ${rejection.reasonCategory}${noteBlock}
+
+위 반려 사유를 반영해서 이 대립을 중립적으로 요약하는 문장을 60자 안팎으로 다시 써라.
+
+규칙:
+1. "모순", "오류", "틀렸다" 같은 단정적·부정적 단어를 쓰지 마라.
+2. "~로 설명하는 AI가 있는 반면, ~로 설명하는 AI도 있습니다"처럼 사실을 나열하는 중립 톤으로 써라.
+3. 위 예시 문장에 없는 내용을 추가하지 마라.`;
+}
+
+async function rewriteConflictSummary(
+  brandName: string,
+  labelA: string,
+  examplesA: string[],
+  labelB: string,
+  examplesB: string[],
+  previousSummary: string,
+  rejection: RejectionContext
+): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
+
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL_SONNET,
+      max_tokens: 512,
+      messages: [
+        {
+          role: 'user',
+          content: buildConflictRewritePrompt(brandName, labelA, examplesA, labelB, examplesB, previousSummary, rejection),
+        },
+      ],
+      tools: [
+        {
+          name: 'report_conflict_summary',
+          description: '다시 쓴 대립 요약 문장을 보고한다.',
+          input_schema: {
+            type: 'object',
+            properties: { summary: { type: 'string' } },
+            required: ['summary'],
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'report_conflict_summary' },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    logOneLinerFailure('rewriteConflictSummary', brandName, response.status, errorBody);
+    throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  logOneLinerUsage('rewriteConflictSummary', brandName, data.usage);
+  const blocks: { type: string; input?: unknown }[] = data.content ?? [];
+  const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
+  const summary = (toolUseBlock?.input as { summary?: unknown })?.summary;
+  if (typeof summary !== 'string' || summary.trim().length === 0) {
+    throw new Error('LLM 응답에서 summary를 찾지 못했습니다.');
+  }
+  return summary.trim();
+}
+
+interface SimpleReviewResult {
+  passed: boolean;
+  reason: string | null;
+}
+
+function buildConflictRewriteReviewPrompt(brandName: string, labelA: string, labelB: string, summary: string): string {
+  return `아래는 "${brandName}"에 대해 "${labelA}"과 "${labelB}"이 서로 다르게 설명되는 지점을 요약한 문장이다. 너는 이 문장을 검수하는 감사자다.
+
+문장: "${summary}"
+
+확인해라:
+1. "모순", "오류", "틀렸다" 같은 단정적·부정적 단어를 쓰지 않았는가?
+2. 사실을 중립적으로 나열하는 톤인가?(인과관계·잘잘못을 단정하지 않는가)
+3. 60자를 크게 넘지 않는가?
+
+하나라도 어겼으면 통과시키지 마라.`;
+}
+
+async function reviewConflictSummaryRewrite(
+  brandName: string,
+  labelA: string,
+  labelB: string,
+  summary: string
+): Promise<SimpleReviewResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
+
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL_SONNET,
+      max_tokens: 512,
+      messages: [{ role: 'user', content: buildConflictRewriteReviewPrompt(brandName, labelA, labelB, summary) }],
+      tools: [
+        {
+          name: 'report_review_result',
+          description: '검수 결과를 보고한다.',
+          input_schema: {
+            type: 'object',
+            properties: { passed: { type: 'boolean' }, reason: { type: 'string' } },
+            required: ['passed'],
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'report_review_result' },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    logOneLinerFailure('reviewConflictSummaryRewrite', brandName, response.status, errorBody);
+    throw new Error(`Anthropic API 오류 (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  logOneLinerUsage('reviewConflictSummaryRewrite', brandName, data.usage);
+  const blocks: { type: string; input?: unknown }[] = data.content ?? [];
+  const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
+  const input = toolUseBlock?.input as { passed?: unknown; reason?: unknown } | undefined;
+  if (!input || typeof input.passed !== 'boolean') {
+    throw new Error('LLM 응답에서 report_review_result 도구 호출을 찾지 못했습니다.');
+  }
+  return { passed: input.passed, reason: typeof input.reason === 'string' ? input.reason : null };
+}
+
+async function regenerateConflictSummaryText(
+  item: StoredReviewItem,
+  brandName: string,
+  rejection: RejectionContext
+): Promise<string | null> {
+  if (!item.sourceId) return null;
+  const conflict = await fetchBrandFeatureConflictById(item.sourceId);
+  if (!conflict) return null;
+
+  const candidates = await fetchBrandFeatureCandidatesForDiagnosis(conflict.diagnosisId, supabaseAdmin);
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const a = byId.get(conflict.featureAId);
+  const b = byId.get(conflict.featureBId);
+  if (!a || !b) return null;
+
+  const evidenceRows = await fetchBrandExpressionsByIds(
+    [...a.evidenceExpressionIds, ...b.evidenceExpressionIds],
+    supabaseAdmin
+  );
+  const evidenceById = new Map(evidenceRows.map((e) => [e.id, e]));
+  const examplesA = a.evidenceExpressionIds
+    .map((id) => evidenceById.get(id)?.sourceSentence)
+    .filter((s): s is string => !!s);
+  const examplesB = b.evidenceExpressionIds
+    .map((id) => evidenceById.get(id)?.sourceSentence)
+    .filter((s): s is string => !!s);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const draft = await rewriteConflictSummary(
+      brandName,
+      a.featureName,
+      examplesA,
+      b.featureName,
+      examplesB,
+      conflict.conflictSummary,
+      rejection
+    );
+    const review = await reviewConflictSummaryRewrite(brandName, a.featureName, b.featureName, draft);
+    if (review.passed) return draft;
+    console.error(
+      `대립 요약 반려 재생성 자동검수 실패 (review_item=${item.id}, attempt=${attempt}): ${review.reason ?? '사유 미상'}`
+    );
+  }
+  return null;
+}
+
+/**
+ * /review 화면의 "반려" 액션이 부르는 단일 진입점(§4). 반려 처리 자체는
+ * 항상 하고, auto_regeneratable && 아직 3회차 미만이면 이어서 재생성까지
+ * 시도한다. 재생성이 실패해도(자동검수 계속 탈락 등) 반려 처리는 이미
+ * 끝난 상태로 남는다 — "수동 처리 필요" 표시는 화면이 pending 재생성행이
+ * 없는 rejected 항목을 보고 판단한다.
+ */
+export async function handleReviewItemRejection(
+  itemId: string,
+  reasonCategory: ReviewReasonCategory,
+  reviewerNote: string | null,
+  reviewerId: string | null
+): Promise<{ regenerated: boolean }> {
+  const item = await fetchReviewItemById(itemId);
+  if (!item) throw new Error(`review_items 행을 찾을 수 없음: ${itemId}`);
+
+  await rejectReviewItem(itemId, reasonCategory, reviewerNote, reviewerId);
+
+  if (!item.autoRegeneratable || item.generationRound >= 3) {
+    return { regenerated: false };
+  }
+
+  const brandName = await fetchBrandNameById(item.brandId);
+  if (!brandName) return { regenerated: false };
+
+  const rejection: RejectionContext = { reasonCategory, note: reviewerNote };
+  let newText: string | null = null;
+  if (item.itemType === 'brand_one_liner') {
+    newText = await regenerateOneLinerText(item, brandName, rejection);
+  } else if (item.itemType === 'feature_conflict_summary') {
+    newText = await regenerateConflictSummaryText(item, brandName, rejection);
+  }
+
+  if (!newText || !item.sourceTable || !item.sourceId) return { regenerated: false };
+
+  await saveReviewItem({
+    brandId: item.brandId,
+    diagnosisId: item.diagnosisId,
+    itemType: item.itemType as ReviewItemType,
+    sourceTable: item.sourceTable,
+    sourceId: item.sourceId,
+    aiText: newText,
+    autoRegeneratable: item.autoRegeneratable,
+    generationRound: item.generationRound + 1,
+    previousItemId: item.id,
+  });
+
+  return { regenerated: true };
 }
 
 // ── 팁 박스 데이터 기반 인사이트 (Day21, 코드 결정적 계산 — LLM 없음) ──
@@ -1154,8 +1560,10 @@ export async function synthesizeBrandOneLiner(
     let usedLocationContext = locationContext;
 
     for (let attempt = 0; attempt < 2 && selected.length >= 2; attempt++) {
-      const draft = await writeOneLiner(brandName, selected, usedLocationContext);
-      const review = await reviewOneLiner(brandName, draft, selected, usedLocationContext);
+      const featureInputs = selected.map(toFeatureInput);
+      const locationInput = usedLocationContext ? toFeatureInput(usedLocationContext) : null;
+      const draft = await writeOneLiner(brandName, featureInputs, locationInput);
+      const review = await reviewOneLiner(brandName, draft, featureInputs, locationInput);
 
       if (review.passed) {
         oneLiner = draft;
@@ -1213,23 +1621,65 @@ export async function synthesizeBrandOneLiner(
         retryCount > 0 ? { originalFeatureCount, retryCount, excludedByReview } : null,
       tipContent,
     });
-    if (id) savedOneLinerIds.push(id);
+    if (id) {
+      savedOneLinerIds.push(id);
+      // 사람 검증 인프라(2026-09-08) — 근거부족은 oneLiner가 null이라 애초에
+      // 검증할 문장이 없다(review_items.ai_text는 not null 제약). '반복확인'만
+      // 진짜 LLM 자유 작성 문장이고, '초기한줄'은 브랜드/특징 이름만 바뀌는
+      // 고정 템플릿이라 반려해도 재생성 의미가 없다(auto_regeneratable=false).
+      if (oneLiner) {
+        await saveReviewItem({
+          brandId: diagnosis.brandId,
+          diagnosisId: diagnosis.id,
+          itemType: 'brand_one_liner',
+          sourceTable: 'brand_one_liners',
+          sourceId: id,
+          aiText: oneLiner,
+          autoRegeneratable: status === '반복확인',
+          evidence: {
+            features: selected.map((c) => ({
+              label: c.group.label,
+              sourceSentences: c.group.members.slice(0, 2).map((m) => m.sourceSentence),
+            })),
+            locationContext: usedLocationContext?.group.label ?? null,
+          },
+        });
+      }
+    }
   }
 
   // ── 잘못된 인지 (원안 9번, 정상 계열과 별개 행으로 저장) ──
   const conflicting = findConflictingFeature(candidates);
   if (conflicting) {
+    const conflictOneLiner = `AI가 '${conflicting.group.label}'라고 인지하고 있지만, 입력된 브랜드 정보와 일치하지 않습니다.`;
     const id = await saveBrandOneLiner({
       diagnosisId: diagnosis.id,
       brandId: diagnosis.brandId,
       status: '잘못된인지',
-      oneLiner: `AI가 '${conflicting.group.label}'라고 인지하고 있지만, 입력된 브랜드 정보와 일치하지 않습니다.`,
+      oneLiner: conflictOneLiner,
       selectedFeatureIds: [conflicting.candidateId],
       locationContextId: null,
       questionIds,
       engineList,
     });
-    if (id) savedOneLinerIds.push(id);
+    if (id) {
+      savedOneLinerIds.push(id);
+      // '잘못된인지' 문장도 고정 템플릿(브랜드/특징 이름만 대입) — 초기한줄과
+      // 같은 이유로 auto_regeneratable=false.
+      await saveReviewItem({
+        brandId: diagnosis.brandId,
+        diagnosisId: diagnosis.id,
+        itemType: 'brand_one_liner_conflict',
+        sourceTable: 'brand_one_liners',
+        sourceId: id,
+        aiText: conflictOneLiner,
+        autoRegeneratable: false,
+        evidence: {
+          conflictingFeature: conflicting.group.label,
+          sourceSentences: conflicting.group.members.slice(0, 2).map((m) => m.sourceSentence),
+        },
+      });
+    }
   }
 
   // ── (Day21) AI 간 "서로 다르게 설명하는 지점" — 위 본문과 별개 단계 ──

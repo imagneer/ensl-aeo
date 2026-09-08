@@ -1638,6 +1638,368 @@ export async function fetchBrandFeatureConflictsForDiagnosis(
   }));
 }
 
+// ── 사람 검증 인프라 (review_items) — 작업지시서_사람검증_인프라_2026-09-08 ──
+//
+// 인지/위치/서사 세 화면의 "해석·제안 층" 문장(관측 수치·인용문 같은
+// 사실 데이터 말고, AI가 요약·판단해서 쓴 문장)은 전부 이 테이블을 거쳐야
+// 클라이언트(editor/viewer)에게 노출된다. owner/admin은 검토 전 초안도
+// "검토 대기" 배지와 함께 볼 수 있다 — brand_one_liners.reviewed_by_human이
+// 하던 역할을 이 테이블로 옮기고 단일 출처화함(2026-09-08).
+
+/** 계속 늘어나는 목록이라 DB check 제약은 안 걸었다 — 이 유니온 타입이
+ *  현재 기준 코드 쪽 소스. 새 화면이 생기면 여기 추가할 것. */
+export type ReviewItemType =
+  | 'brand_one_liner' // 브랜드 인지 화면 — 본문 한 줄 (반복확인/초기한줄)
+  | 'brand_one_liner_conflict' // 브랜드 인지 화면 — '잘못된인지' 행
+  | 'feature_conflict_summary'; // 브랜드 인지 화면 3번 칸 — "서로 다르게 설명하는 지점"
+
+export type ReviewItemStatus = 'pending' | 'approved' | 'rejected';
+
+export type ReviewReasonCategory = '과잉해석' | '사실불일치' | '표현누락' | '문체톤' | '기타';
+
+const REVIEW_ITEM_COLUMNS =
+  'id, brand_id, diagnosis_id, item_type, source_table, source_id, ai_text, final_text, status, edited, auto_regeneratable, reason_category, reviewer_note, reviewer_id, reviewed_at, generation_round, previous_item_id, evidence, created_at';
+
+export interface StoredReviewItem {
+  id: string;
+  brandId: string;
+  diagnosisId: string;
+  itemType: string;
+  sourceTable: string | null;
+  sourceId: string | null;
+  aiText: string;
+  finalText: string | null;
+  status: ReviewItemStatus;
+  edited: boolean;
+  autoRegeneratable: boolean;
+  reasonCategory: string | null;
+  reviewerNote: string | null;
+  reviewerId: string | null;
+  reviewedAt: string | null;
+  generationRound: number;
+  previousItemId: string | null;
+  evidence: unknown;
+  createdAt: string;
+}
+
+export interface ReviewItemToSave {
+  brandId: string;
+  diagnosisId: string;
+  itemType: ReviewItemType;
+  sourceTable: string;
+  sourceId: string;
+  aiText: string;
+  /** false면 반려돼도 자동 재생성 안 함(고정 템플릿 문장 — 다시 불러도
+   *  같은 문장이 나오므로 의미 없음, 2026-09-08 코난 제안·루아 확인). */
+  autoRegeneratable: boolean;
+  generationRound?: number; // 기본 1
+  previousItemId?: string | null; // 반려→재생성 이력 체인
+  evidence?: unknown;
+}
+
+export async function saveReviewItem(input: ReviewItemToSave): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('review_items')
+    .insert({
+      brand_id: input.brandId,
+      diagnosis_id: input.diagnosisId,
+      item_type: input.itemType,
+      source_table: input.sourceTable,
+      source_id: input.sourceId,
+      ai_text: input.aiText,
+      auto_regeneratable: input.autoRegeneratable,
+      generation_round: input.generationRound ?? 1,
+      previous_item_id: input.previousItemId ?? null,
+      evidence: input.evidence ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('review_items 저장 실패:', error);
+    return null;
+  }
+  return data.id;
+}
+
+function mapReviewItemRow(row: {
+  id: string;
+  brand_id: string;
+  diagnosis_id: string;
+  item_type: string;
+  source_table: string | null;
+  source_id: string | null;
+  ai_text: string;
+  final_text: string | null;
+  status: ReviewItemStatus;
+  edited: boolean;
+  auto_regeneratable: boolean;
+  reason_category: string | null;
+  reviewer_note: string | null;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  generation_round: number;
+  previous_item_id: string | null;
+  evidence: unknown;
+  created_at: string;
+}): StoredReviewItem {
+  return {
+    id: row.id,
+    brandId: row.brand_id,
+    diagnosisId: row.diagnosis_id,
+    itemType: row.item_type,
+    sourceTable: row.source_table,
+    sourceId: row.source_id,
+    aiText: row.ai_text,
+    finalText: row.final_text,
+    status: row.status,
+    edited: row.edited,
+    autoRegeneratable: row.auto_regeneratable,
+    reasonCategory: row.reason_category,
+    reviewerNote: row.reviewer_note,
+    reviewerId: row.reviewer_id,
+    reviewedAt: row.reviewed_at,
+    generationRound: row.generation_round,
+    previousItemId: row.previous_item_id,
+    evidence: row.evidence,
+    createdAt: row.created_at,
+  };
+}
+
+/** 원천 행(source_table+source_id) 하나의 "현재" 검토 항목 — 반려→재생성
+ *  이력 중 가장 최신 회차(generation_round 최대)를 지금 상태로 본다. */
+export async function fetchCurrentReviewItem(
+  sourceTable: string,
+  sourceId: string,
+  client: SupabaseClient
+): Promise<StoredReviewItem | null> {
+  const { data, error } = await client
+    .from('review_items')
+    .select(REVIEW_ITEM_COLUMNS)
+    .eq('source_table', sourceTable)
+    .eq('source_id', sourceId)
+    .order('generation_round', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('review_items 단건 조회 실패:', error);
+    return null;
+  }
+  return data ? mapReviewItemRow(data) : null;
+}
+
+/** 한 진단의 특정 item_type 전체 — source_id별로 최신 회차만 남긴다
+ *  (feature_conflict_summary처럼 한 진단에 여러 건 있는 타입용. 단일
+ *  항목 타입에도 써도 되지만 그 경우 fetchCurrentReviewItem이 더 직접적). */
+export async function fetchCurrentReviewItemsForDiagnosis(
+  diagnosisId: string,
+  itemType: ReviewItemType,
+  client: SupabaseClient
+): Promise<StoredReviewItem[]> {
+  const { data, error } = await client
+    .from('review_items')
+    .select(REVIEW_ITEM_COLUMNS)
+    .eq('diagnosis_id', diagnosisId)
+    .eq('item_type', itemType)
+    .order('generation_round', { ascending: false });
+
+  if (error) {
+    console.error('review_items 목록 조회 실패:', error);
+    return [];
+  }
+
+  const latestBySource = new Map<string, StoredReviewItem>();
+  for (const row of (data ?? []).map(mapReviewItemRow)) {
+    if (!row.sourceId) continue;
+    if (!latestBySource.has(row.sourceId)) latestBySource.set(row.sourceId, row);
+  }
+  return Array.from(latestBySource.values());
+}
+
+/** editor/viewer 화면 게이팅용 — 승인된 최종문 또는 null. 한 진단에 항목이
+ *  하나뿐인 타입(brand_one_liner, brand_one_liner_conflict) 전용이다.
+ *  feature_conflict_summary처럼 여러 건인 타입은 fetchCurrentReviewItemsForDiagnosis를
+ *  직접 써서 항목별로 판단할 것("같은 개념=같은 기준"이지만 단일/다건은
+ *  화면에서 렌더 방식이 근본적으로 다르므로 억지로 한 헬퍼에 안 우겨넣음). */
+export async function getApprovedText(
+  diagnosisId: string,
+  itemType: ReviewItemType,
+  client: SupabaseClient
+): Promise<string | null> {
+  const items = await fetchCurrentReviewItemsForDiagnosis(diagnosisId, itemType, client);
+  const item = items[0] ?? null;
+  return item && item.status === 'approved' ? item.finalText : null;
+}
+
+export interface PendingReviewItemWithBrand extends StoredReviewItem {
+  brandName: string;
+}
+
+function extractBrandName(row: { brands: { name: string } | { name: string }[] | null }): string {
+  const b = Array.isArray(row.brands) ? row.brands[0] : row.brands;
+  return b?.name ?? '알 수 없음';
+}
+
+/** /review 화면 대기 목록(§3) — 브랜드별 그룹은 화면에서 하고, 여기선
+ *  오래된 순 전체 목록만 돌려준다. owner/admin 전용 화면이 쓴다(RLS는
+ *  supabaseAdmin이라 role 체크는 호출부/페이지에서 이미 끝났다고 가정). */
+export async function fetchPendingReviewItems(): Promise<PendingReviewItemWithBrand[]> {
+  const { data, error } = await supabaseAdmin
+    .from('review_items')
+    .select(`${REVIEW_ITEM_COLUMNS}, brands(name)`)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('대기 중 review_items 조회 실패:', error);
+    return [];
+  }
+  return (data ?? []).map((row) => ({ ...mapReviewItemRow(row), brandName: extractBrandName(row) }));
+}
+
+/** 이력 탭(§3) — 승인·반려 완료 목록, 최신순. */
+export async function fetchReviewItemHistory(limit = 200): Promise<PendingReviewItemWithBrand[]> {
+  const { data, error } = await supabaseAdmin
+    .from('review_items')
+    .select(`${REVIEW_ITEM_COLUMNS}, brands(name)`)
+    .in('status', ['approved', 'rejected'])
+    .order('reviewed_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('review_items 이력 조회 실패:', error);
+    return [];
+  }
+  return (data ?? []).map((row) => ({ ...mapReviewItemRow(row), brandName: extractBrandName(row) }));
+}
+
+export async function fetchReviewItemById(id: string): Promise<StoredReviewItem | null> {
+  const { data, error } = await supabaseAdmin
+    .from('review_items')
+    .select(REVIEW_ITEM_COLUMNS)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('review_items 단건(id) 조회 실패:', error);
+    return null;
+  }
+  return data ? mapReviewItemRow(data) : null;
+}
+
+export async function approveReviewItem(
+  id: string,
+  finalText: string,
+  edited: boolean,
+  reviewerId: string | null
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('review_items')
+    .update({
+      status: 'approved',
+      final_text: finalText,
+      edited,
+      reviewer_id: reviewerId,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+
+  if (error) {
+    console.error('review_items 승인 처리 실패:', error);
+    return false;
+  }
+  return true;
+}
+
+export async function fetchBrandNameById(brandId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.from('brands').select('name').eq('id', brandId).maybeSingle();
+  if (error) {
+    console.error('브랜드 이름 조회 실패:', error);
+    return null;
+  }
+  return data?.name ?? null;
+}
+
+/** 반려→재생성(§4)이 "무엇을 근거로 다시 썼는지" 재구성할 때 쓴다 —
+ *  brand_one_liners 행 하나의 특징 참조만 필요해서 좁게 조회한다. */
+export interface BrandOneLinerCandidateRefs {
+  diagnosisId: string;
+  brandId: string;
+  selectedFeatureIds: string[] | null;
+  locationContextId: string | null;
+}
+
+export async function fetchBrandOneLinerRefsById(
+  id: string
+): Promise<BrandOneLinerCandidateRefs | null> {
+  const { data, error } = await supabaseAdmin
+    .from('brand_one_liners')
+    .select('diagnosis_id, brand_id, selected_feature_ids, location_context_id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('brand_one_liners(id) 참조 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+  return {
+    diagnosisId: data.diagnosis_id,
+    brandId: data.brand_id,
+    selectedFeatureIds: data.selected_feature_ids,
+    locationContextId: data.location_context_id,
+  };
+}
+
+export async function fetchBrandFeatureConflictById(
+  id: string
+): Promise<StoredBrandFeatureConflict | null> {
+  const { data, error } = await supabaseAdmin
+    .from('brand_feature_conflicts')
+    .select('id, diagnosis_id, brand_id, feature_a_id, feature_b_id, conflict_summary')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('brand_feature_conflicts(id) 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+  return {
+    id: data.id,
+    diagnosisId: data.diagnosis_id,
+    brandId: data.brand_id,
+    featureAId: data.feature_a_id,
+    featureBId: data.feature_b_id,
+    conflictSummary: data.conflict_summary,
+  };
+}
+
+export async function rejectReviewItem(
+  id: string,
+  reasonCategory: ReviewReasonCategory,
+  reviewerNote: string | null,
+  reviewerId: string | null
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('review_items')
+    .update({
+      status: 'rejected',
+      reason_category: reasonCategory,
+      reviewer_note: reviewerNote,
+      reviewer_id: reviewerId,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+
+  if (error) {
+    console.error('review_items 반려 처리 실패:', error);
+    return false;
+  }
+  return true;
+}
+
 // ── Day22 "인지와 위치의 간극" — 자리질문 역할판정 대상 조회 ──
 
 export interface PlacementMentionForRoleJudgment {
@@ -2223,7 +2585,6 @@ interface StoredBrandOneLinerRow {
   locationContextId: string | null;
   questionIds: string[];
   engineList: string[];
-  reviewedByHuman: boolean;
   tipContent: TipContent;
 }
 
@@ -2232,6 +2593,8 @@ export interface BrandOneLinerConflict {
   /** brand_feature_candidates.id 목록 — 화면이 일반 특징 목록에서 이걸
    *  제외해야 한다(v1.2, "잘못된인지"는 일반 목록에 안 섞임). */
   featureCandidateIds: string[];
+  /** owner/admin에게만 의미 있음 — BrandOneLinerMain.reviewed와 같은 이유. */
+  reviewed: boolean;
 }
 
 export type BrandOneLinerMain =
@@ -2271,11 +2634,23 @@ export interface BrandOneLinerView {
 /**
  * 브랜드 인지 화면(Day 20)이 쓰는 단일 진입점.
  *
- * viewerRole이 'editor'|'viewer'면 reviewed_by_human=false인 콘텐츠는
- * 존재 자체를 숨긴다(그런 콘텐츠가 있다는 사실도 안 알려준다 — "검토
- * 대기 배지"조차 안 보여주고 그냥 '진단중'과 구분 안 되게 만든다).
+ * 2026-09-08부터 게이팅 출처가 brand_one_liners.reviewed_by_human에서
+ * review_items로 바뀌었다(사람 검증 인프라, 단일 출처화). 그 컬럼은
+ * 당장 안 지우지만 여기선 더 이상 읽지 않는다 — 값이 있어도 화면 동작에
+ * 영향 없는 죽은 컬럼이니 헷갈리지 말 것.
+ *
+ * viewerRole이 'editor'|'viewer'면 review_items가 'approved'가 아닌
+ * 콘텐츠는 존재 자체를 숨긴다(그런 콘텐츠가 있다는 사실도 안 알려준다 —
+ * "검토 대기 배지"조차 안 보여주고 그냥 '진단중'과 구분 안 되게 만든다).
  * owner/admin은 검토 여부와 무관하게 항상 다 보고, reviewed 플래그로
  * "아직 검토 전"임을 알 수 있다.
+ *
+ * ⚠️ '근거부족'(oneLiner=null)은 예외 — 검증할 문장 자체가 없어서
+ * review_items 행이 안 생긴다(§1 원칙 2: 관측 층/문장 없음은 검증 대상
+ * 아님). 그래서 role과 무관하게 그대로 노출한다. 예전엔(reviewed_by_human
+ * 시절) 이 경우도 무조건 false로 저장돼서 사실상 항상 막혀 있었는데,
+ * 검증할 게 없는데 승인 대기시키는 건 원칙에 안 맞는 동작이었다 — 이번에
+ * 바로잡음(2026-09-08, 코난 판단·루아에게 보고).
  *
  * diagnosisId를 주면 "최신 진단"이 아니라 그 특정 진단을 조회한다 —
  * Day23(변화 추이)에서 과거 회차를 순회할 때 이 함수를 그대로 재사용하기
@@ -2301,7 +2676,7 @@ export async function fetchLatestBrandOneLiner(
   const { data, error } = await client
     .from('brand_one_liners')
     .select(
-      'id, diagnosis_id, status, one_liner, selected_feature_ids, location_context_id, question_ids, engine_list, reviewed_by_human, tip_content'
+      'id, diagnosis_id, status, one_liner, selected_feature_ids, location_context_id, question_ids, engine_list, tip_content'
     )
     .eq('diagnosis_id', diagnosis.id)
     // 2026-09-04, 재시도 중복 방어. 이 테이블엔 created_at이 없고
@@ -2325,7 +2700,6 @@ export async function fetchLatestBrandOneLiner(
     locationContextId: row.location_context_id,
     questionIds: row.question_ids,
     engineList: row.engine_list,
-    reviewedByHuman: row.reviewed_by_human,
     tipContent: row.tip_content
       ? {
           type: 'data',
@@ -2343,21 +2717,32 @@ export async function fetchLatestBrandOneLiner(
   const mainRow = rows.find((r) => r.status !== '잘못된인지') ?? null;
   const conflictRow = rows.find((r) => r.status === '잘못된인지') ?? null;
 
+  const mainReview =
+    mainRow && mainRow.oneLiner ? await fetchCurrentReviewItem('brand_one_liners', mainRow.id, client) : null;
+  const conflictReview =
+    conflictRow && conflictRow.oneLiner
+      ? await fetchCurrentReviewItem('brand_one_liners', conflictRow.id, client)
+      : null;
+
   let main: BrandOneLinerMain;
   if (!mainRow) {
     // completed인데 brand_one_liners 행 자체가 없음 — 합성 실패 상황 대비 방어적 처리
     main = { state: '진단중', daysElapsed: daysElapsedSince(diagnosis.startedAt) };
-  } else if (isRestrictedRole && !mainRow.reviewedByHuman) {
+  } else if (mainRow.status !== '근거부족' && isRestrictedRole && mainReview?.status !== 'approved') {
     main = { state: '진단중', daysElapsed: daysElapsedSince(diagnosis.startedAt) };
   } else {
+    const displayOneLiner =
+      mainRow.status === '근거부족'
+        ? null
+        : (mainReview?.status === 'approved' ? mainReview.finalText : mainReview?.aiText) ?? mainRow.oneLiner;
     main = {
       state: '완료',
       diagnosis: { id: diagnosis.id, startedAt: diagnosis.startedAt, endedAt: diagnosis.endedAt },
       status: mainRow.status as '반복확인' | '초기한줄' | '근거부족',
-      oneLiner: mainRow.oneLiner,
+      oneLiner: displayOneLiner,
       selectedFeatureIds: mainRow.selectedFeatureIds ?? [],
       locationContextId: mainRow.locationContextId,
-      reviewed: mainRow.reviewedByHuman,
+      reviewed: mainRow.status === '근거부족' ? true : mainReview?.status === 'approved',
       questionIds: mainRow.questionIds,
       engineList: mainRow.engineList,
       tipContent: mainRow.tipContent,
@@ -2365,8 +2750,14 @@ export async function fetchLatestBrandOneLiner(
   }
 
   const conflicting: BrandOneLinerConflict | null =
-    conflictRow && conflictRow.oneLiner && (!isRestrictedRole || conflictRow.reviewedByHuman)
-      ? { oneLiner: conflictRow.oneLiner, featureCandidateIds: conflictRow.selectedFeatureIds ?? [] }
+    conflictRow && conflictRow.oneLiner && (!isRestrictedRole || conflictReview?.status === 'approved')
+      ? {
+          oneLiner:
+            (conflictReview?.status === 'approved' ? conflictReview.finalText : conflictReview?.aiText) ??
+            conflictRow.oneLiner,
+          featureCandidateIds: conflictRow.selectedFeatureIds ?? [],
+          reviewed: conflictReview?.status === 'approved',
+        }
       : null;
 
   return { main, conflicting };
