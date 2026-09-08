@@ -183,7 +183,12 @@ async function groupSimilarExpressions(
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL_SONNET,
-      max_tokens: 4096,
+      // 2026-09-08 실측: 진단 7일치 실데이터로 처음 돌려보니 4096으로는
+      // 부족해서 stop_reason=max_tokens로 잘려 groups 필드가 아예 빈 채로
+      // (tool_use input={}) 응답이 왔다 — 표현 개수가 늘수록 그룹·근거
+      // 목록도 늘어나는데, 이 값은 원래 소규모 테스트 데이터 기준으로만
+      // 정했던 것(실측 검증 없이). 4배로 올려서 재시도.
+      max_tokens: 16384,
       messages: [{ role: 'user', content: prompt }],
       tools: [
         {
@@ -228,12 +233,35 @@ async function groupSimilarExpressions(
   const blocks: { type: string; input?: unknown }[] = data.content ?? [];
   const toolUseBlock = blocks.find((b) => b.type === 'tool_use');
   if (!toolUseBlock || typeof toolUseBlock.input !== 'object' || toolUseBlock.input === null) {
-    throw new Error('LLM 응답에서 report_expression_groups 도구 호출을 찾지 못했습니다.');
+    // 2026-09-08 실측: stop_reason이 뭐였는지가 원인 진단의 핵심인데(예:
+    // max_tokens에 걸려 tool_use 블록 자체가 안 만들어졌는지, 다른 이유인지)
+    // 기존엔 이 정보 없이 에러 메시지만 던져서 재현 전엔 원인을 알 방법이
+    // 없었다 — 다음에 또 실패하면 바로 원인을 알 수 있게 남긴다.
+    console.error('groupSimilarExpressions 실패 상세:', JSON.stringify({ stopReason: data.stop_reason, blocks }));
+    throw new Error(`LLM 응답에서 report_expression_groups 도구 호출을 찾지 못했습니다 (stop_reason=${data.stop_reason}).`);
   }
 
-  const rawGroups = (toolUseBlock.input as { groups?: unknown }).groups;
+  let rawGroups: unknown = (toolUseBlock.input as { groups?: unknown }).groups;
+
+  // 2026-09-08 실측(365서울원탑치과 1차 진단, 표현 380여 개 규모): tool_choice로
+  // 스키마를 강제했는데도 groups를 배열이 아니라 "{\"groups\":[...]}" 형태의
+  // JSON 문자열로 한 번 더 감싸서 내놓는 걸 확인 — 데이터 자체는 정상이라
+  // 방어적으로 한 번 더 파싱해서 구제한다. ⚠️ 원인 불명(모델의 구조화 출력이
+  // 가끔 이렇게 나오는 것으로 추정, 확인된 사실 아님) — 계속 재발하면 Anthropic
+  // 쪽에 문의하거나 스키마를 바꿔야 할 수도 있다.
+  if (typeof rawGroups === 'string') {
+    console.error('groupSimilarExpressions: groups가 문자열로 옴 — 재파싱 시도(모델 이상 동작 가능성, 재발 시 확인 필요)');
+    try {
+      const parsed: unknown = JSON.parse(rawGroups);
+      rawGroups = Array.isArray(parsed) ? parsed : (parsed as { groups?: unknown } | null)?.groups;
+    } catch {
+      // 아래 Array.isArray 체크에서 그대로 걸러진다
+    }
+  }
+
   if (!Array.isArray(rawGroups)) {
-    throw new Error('LLM 응답의 groups 필드가 배열이 아닙니다.');
+    console.error('groupSimilarExpressions 실패 상세:', JSON.stringify({ stopReason: data.stop_reason, input: toolUseBlock.input }));
+    throw new Error(`LLM 응답의 groups 필드가 배열이 아닙니다 (stop_reason=${data.stop_reason}).`);
   }
 
   const output: RawGroup[] = [];
