@@ -1912,6 +1912,34 @@ export async function approveReviewItem(
   return true;
 }
 
+/**
+ * 그날 daily 집계가 실제로 끝났는지 확인 — /api/complete-diagnoses가
+ * /api/aggregate-daily와 별도 크론으로 분리되면서(2026-09-08, 타임아웃 대응)
+ * 생긴 안전장치. aggregated_metrics는 daily 집계가 그날치 쿼리×엔진 조합마다
+ * 무조건 한 행씩 남기므로(브랜드 언급 여부와 무관하게), 이 테이블에 그날
+ * period_start로 시작하는 행이 하나라도 있으면 "그날 집계는 끝났다"고 볼 수
+ * 있다 — brand_expressions는 언급이 없으면 0행일 수 있어서 이 용도로 못 쓴다.
+ *
+ * @param periodStart kstDayBoundsUtc(dateKST).periodStart — lib/aggregator.ts가
+ *   supabase.ts를 이미 import하고 있어서(순환 참조 방지), 계산은 호출부(크론
+ *   라우트)가 하고 여기엔 계산된 값만 넘긴다.
+ */
+export async function hasAggregatedMetricsForDay(periodStart: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('id')
+    .eq('period_start', periodStart)
+    .eq('aggregation_level', 'daily')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('그날 집계 완료 여부 확인 실패:', error);
+    return false; // 확인 자체가 실패하면 안전하게 "아직 안 끝남"으로 처리 — 데이터 누락보다 재시도가 낫다
+  }
+  return !!data;
+}
+
 export async function fetchBrandNameById(brandId: string): Promise<string | null> {
   const { data, error } = await supabaseAdmin.from('brands').select('name').eq('id', brandId).maybeSingle();
   if (error) {
