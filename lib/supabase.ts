@@ -3142,17 +3142,42 @@ export async function fetchQuerySnapshotsWithMentionsBatch(
   if (!snapshotRows || snapshotRows.length === 0) return result;
 
   const snapshotIds = snapshotRows.map((s) => s.id);
-  const { data: mentionRows, error: mentionError } = await client
-    .from('mentions')
-    .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains')
-    .in('snapshot_id', snapshotIds);
 
-  if (mentionError) {
-    console.error('브랜드 현 위치용 mentions 배치 조회 실패:', mentionError);
+  // ⚠️ (2026-09-09 발견) 자리 질문 9개를 한 번에 묶다 보니 이 mentions 조회가
+  // 1,000행이 넘는 경우가 실제로 있었다(365서울원탑치과 1차 진단: 1,325행).
+  // Supabase(PostgREST)는 결과가 기본 한도를 넘으면 에러 없이 뒤쪽을 조용히
+  // 잘라서 돌려주기 때문에, .range()로 직접 다음 페이지를 계속 받아와야
+  // 전체가 빠짐없이 들어온다 — 위 snapshots 조회는 (질문 9개 × 최대 7일 ×
+  // 6엔진 규모라) 지금은 1,000행 밑이라 안전하지만, mentions는 한 snapshot에
+  // 여러 브랜드가 같이 잡히는 일이 흔해서 훨씬 빨리 한도에 닿는다.
+  const PAGE_SIZE = 1000;
+  const mentionRows: {
+    snapshot_id: string;
+    brand_id: string | null;
+    brand_name_raw: string;
+    is_target: boolean;
+    source_urls: string[] | null;
+    source_domains: string[] | null;
+  }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data: page, error: mentionError } = await client
+      .from('mentions')
+      .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains')
+      .in('snapshot_id', snapshotIds)
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (mentionError) {
+      console.error('브랜드 현 위치용 mentions 배치 조회 실패:', mentionError);
+      break;
+    }
+    if (!page || page.length === 0) break;
+    mentionRows.push(...page);
+    if (page.length < PAGE_SIZE) break;
   }
 
   const mentionsBySnapshot = new Map<string, QuerySnapshotMention[]>();
-  for (const m of mentionRows ?? []) {
+  for (const m of mentionRows) {
     if (!mentionsBySnapshot.has(m.snapshot_id)) mentionsBySnapshot.set(m.snapshot_id, []);
     mentionsBySnapshot.get(m.snapshot_id)!.push({
       brandId: m.brand_id,
