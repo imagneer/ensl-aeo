@@ -106,7 +106,11 @@ function ReviewItemCard({ item }: { item: PendingReviewItemWithBrand }) {
     >
       <p style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
         {ITEM_TYPE_LABEL[item.itemType] ?? item.itemType}
-        {item.generationRound > 1 && ` · ${item.generationRound}차 재생성`}
+        {/* §3-1: pending인데 2회차 이상이면 "N차 · 반려 사유: [분류]" —
+            직전 회차가 왜 반려됐는지 보여줘야 검토자가 맥락을 알고 판단함 */}
+        {item.status === 'pending' && item.generationRound > 1 && (
+          <> · {item.generationRound}차{item.previousReasonCategory && ` · 반려 사유: ${item.previousReasonCategory}${item.previousReviewerNote ? ` — ${item.previousReviewerNote}` : ''}`}</>
+        )}
         {!item.autoRegeneratable && ' · 수동 수정 전용'}
         {item.status === 'rejected' && (
           <span style={{ color: '#b44', fontWeight: 600 }}> · 수동 처리 필요</span>

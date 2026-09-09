@@ -1849,23 +1849,13 @@ export async function fetchCurrentReviewItemStatuses(
   return Array.from(latestBySource.values());
 }
 
-/** editor/viewer 화면 게이팅용 — 승인된 최종문 또는 null. 한 진단에 항목이
- *  하나뿐인 타입(brand_one_liner, brand_one_liner_conflict) 전용이다.
- *  feature_conflict_summary처럼 여러 건인 타입은 fetchCurrentReviewItemsForDiagnosis를
- *  직접 써서 항목별로 판단할 것("같은 개념=같은 기준"이지만 단일/다건은
- *  화면에서 렌더 방식이 근본적으로 다르므로 억지로 한 헬퍼에 안 우겨넣음). */
-export async function getApprovedText(
-  diagnosisId: string,
-  itemType: ReviewItemType,
-  client: SupabaseClient
-): Promise<string | null> {
-  const items = await fetchCurrentReviewItemsForDiagnosis(diagnosisId, itemType, client);
-  const item = items[0] ?? null;
-  return item && item.status === 'approved' ? item.finalText : null;
-}
-
 export interface PendingReviewItemWithBrand extends StoredReviewItem {
   brandName: string;
+  /** 반려→재생성으로 이 회차가 태어났다면(generationRound>1), 직전 회차가
+   *  반려됐을 때의 사유 — §3-1 "N차 · 반려 사유: [분류]" 표시용. 1회차거나
+   *  previousItemId를 못 찾으면 null. */
+  previousReasonCategory: string | null;
+  previousReviewerNote: string | null;
 }
 
 function extractBrandName(row: { brands: { name: string } | { name: string }[] | null }): string {
@@ -1898,17 +1888,31 @@ export async function fetchPendingReviewItems(): Promise<PendingReviewItemWithBr
     return [];
   }
 
-  const rows = (data ?? []).map((row) => ({ ...mapReviewItemRow(row), brandName: extractBrandName(row) }));
+  const rows = (data ?? []).map((row) => mapReviewItemRow(row));
+  const brandNameById = new Map(rows.map((row, i) => [row.id, extractBrandName((data ?? [])[i])]));
+  // §3-1 "N차 · 반려 사유: [분류]" — previous_item_id로 직전(반려된) 회차를
+  // 찾아 사유를 붙인다. 이미 전체 회차를 다 가져왔으니 추가 조회 없이 여기서
+  // 바로 룩업한다.
+  const byId = new Map(rows.map((row) => [row.id, row]));
 
-  const latestBySource = new Map<string, PendingReviewItemWithBrand>();
+  const latestBySource = new Map<string, StoredReviewItem>();
   for (const row of rows) {
     const key = `${row.sourceTable}:${row.sourceId}`;
     const prev = latestBySource.get(key);
     if (!prev || row.generationRound > prev.generationRound) latestBySource.set(key, row);
   }
-  return Array.from(latestBySource.values()).filter(
-    (r) => r.status === 'pending' || r.status === 'rejected'
-  );
+
+  return Array.from(latestBySource.values())
+    .filter((r) => r.status === 'pending' || r.status === 'rejected')
+    .map((r) => {
+      const previous = r.previousItemId ? byId.get(r.previousItemId) : null;
+      return {
+        ...r,
+        brandName: brandNameById.get(r.id) ?? '알 수 없음',
+        previousReasonCategory: previous?.reasonCategory ?? null,
+        previousReviewerNote: previous?.reviewerNote ?? null,
+      };
+    });
 }
 
 /** 이력 탭(§3) — 승인·반려 완료 목록, 최신순. */
@@ -1924,7 +1928,14 @@ export async function fetchReviewItemHistory(limit = 200): Promise<PendingReview
     console.error('review_items 이력 조회 실패:', error);
     return [];
   }
-  return (data ?? []).map((row) => ({ ...mapReviewItemRow(row), brandName: extractBrandName(row) }));
+  // 이력 탭은 항목 자체의 reason_category(반려된 경우 자기 자신의 사유)를
+  // 이미 보여주므로 "직전 회차 사유"는 여기선 안 씀 — 타입만 맞춰 null로 채움.
+  return (data ?? []).map((row) => ({
+    ...mapReviewItemRow(row),
+    brandName: extractBrandName(row),
+    previousReasonCategory: null,
+    previousReviewerNote: null,
+  }));
 }
 
 export async function fetchReviewItemById(id: string): Promise<StoredReviewItem | null> {
