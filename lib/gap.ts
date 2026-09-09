@@ -60,6 +60,88 @@ export function sumPlacementTotalValidRuns(recordsByQuery: QuerySnapshotRecord[]
   return recordsByQuery.reduce((sum, records) => sum + computeAppearanceHeaderStats(records).totalValidRuns, 0);
 }
 
+/**
+ * sumPlacementTotalValidRuns와 분모가 다르다 — 저건 "우리 등장 여부와
+ * 무관하게 시도된 유효 관측 전체"(간극 화면 본문의 reason_stated 비율용,
+ * "언급조차 안 됨"도 0점으로 셀 만한 분모가 맞는 지표), 이건 "그중 우리
+ * 브랜드가 실제로 등장한 관측"만 센다(2026-09-09 정정 — TOP10처럼 "우리
+ * 브랜드를 설명한 표현"을 다루는 지표는 애초에 우리가 등장 안 한 관측을
+ * 분모에 넣으면 안 된다, 등장하지 않은 관측엔 표현 자체가 존재할 수 없어서
+ * 비율의 뜻이 안 맞기 때문).
+ */
+export function sumPlacementAppearedRuns(recordsByQuery: QuerySnapshotRecord[][]): number {
+  return recordsByQuery.reduce((sum, records) => sum + computeAppearanceHeaderStats(records).appearedRuns, 0);
+}
+
+export interface PlacementFeatureFrequency {
+  keyword: string;
+  /** 이 표현이 등장한 "유효 관측" 횟수. */
+  count: number;
+  /** 분모 — 우리 브랜드가 실제로 등장한 관측 수(sumPlacementAppearedRuns
+   *  결과를 그대로 받는다. sumPlacementTotalValidRuns와 다르다 — 그건
+   *  "등장 여부 무관 전체", 이건 "그중 우리가 등장한 것만").
+   *  ⚠️ 이 표현 데이터(aggregated_metrics.top_keywords)는 이 분모보다 더
+   *  적은 관측만 커버할 수 있다 — 일부 날짜는 집계 자체가 밀려서 아예
+   *  안 됐을 수 있다(기존에 알려진 daily 집계 지연 부채와 같은 종류).
+   *  즉 count 합계가 이 분모보다 항상 작을 수 있고, 그건 "표현이 없어서"가
+   *  아니라 "집계가 아직 못 따라가서"일 수 있다 — 화면에서 이 차이를
+   *  숨기지 않는다(호출부가 placementFeatureDataRuns로 따로 보여줌). */
+  appearedRuns: number;
+  rate: number;
+}
+
+/**
+ * 자리질문 9개 전체에 걸쳐 daily 집계된 top_keywords(질문×엔진×날짜 단위
+ * 행, fetchAggregatedKeywordRowsForQueries 결과)를 문자열 완전일치로 합쳐서
+ * 빈도순 TOP N을 낸다("추천 특징 TOP10", 2026-09-09 작업지시).
+ *
+ * ⚠️ brand-position.ts의 combineTopKeywords와 셈법이 다르다 — 그쪽은 한
+ * daily 행 안에 같은 표현이 여러 번 잡히면 그대로 다 더하지만(빈도 합산),
+ * 여기서는 한 daily 행(=관측 1회) 안에서 같은 표현이 여러 번 잡혀도 "관측
+ * 1회"로만 센다. 분모를 "우리 브랜드가 등장한 관측 횟수"(appearedRuns,
+ * 2026-09-09 정정 — 처음엔 "전체 유효 관측"으로 잘못 잡았다가, 등장 안 한
+ * 관측엔 표현 자체가 있을 수 없다는 걸 뒤늦게 확인하고 고쳤다)로 잡았기
+ * 때문에, 분자도 같은 단위(관측 횟수)여야 "27% · 220회 중 11회" 같은
+ * 표기가 실제로 뜻이 통한다 — 안 그러면 한 답변 안에서 같은 표현이 두 번
+ * 나온 것만으로 분자가 분모보다 커 보이는 경우가 생길 수 있다(알려진
+ * 정합성 이슈 1번 "교집합이 부분집합보다 클 수 없음"과 같은 이유).
+ */
+export function buildPlacementFeatureFrequencyTop10(
+  keywordRows: { topKeywords: { keyword: string; count: number }[] | null }[],
+  appearedRuns: number,
+  topN = 10
+): PlacementFeatureFrequency[] {
+  const countByKeyword = new Map<string, number>();
+  const firstSeenOrder: string[] = [];
+
+  for (const row of keywordRows) {
+    if (!row.topKeywords) continue;
+    const seenInRow = new Set<string>();
+    for (const { keyword } of row.topKeywords) {
+      if (seenInRow.has(keyword)) continue;
+      seenInRow.add(keyword);
+      if (!countByKeyword.has(keyword)) {
+        countByKeyword.set(keyword, 0);
+        firstSeenOrder.push(keyword);
+      }
+      countByKeyword.set(keyword, countByKeyword.get(keyword)! + 1);
+    }
+  }
+
+  return firstSeenOrder
+    .map((keyword) => {
+      const count = countByKeyword.get(keyword)!;
+      return {
+        keyword,
+        count,
+        appearedRuns,
+        rate: appearedRuns > 0 ? count / appearedRuns : 0,
+      };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, topN);
+}
+
 export type GapPill = 'gap' | 'works' | 'new' | 'condition' | null;
 
 export const GAP_PILL_LABEL: Record<Exclude<GapPill, null>, string> = {

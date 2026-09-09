@@ -19,6 +19,8 @@ import { fetchGapFeatureUniverse, getBrandSegmentText } from '@/lib/mention-feat
 import {
   buildFeatureGapStats,
   sumPlacementTotalValidRuns,
+  sumPlacementAppearedRuns,
+  buildPlacementFeatureFrequencyTop10,
   selectGapHero,
   sortForFeatureList,
   visibleGapFeatures,
@@ -167,6 +169,14 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
   }
 
   const totalValidRuns = sumPlacementTotalValidRuns([...recordsByQuery.values()]);
+  const totalAppearedRuns = sumPlacementAppearedRuns([...recordsByQuery.values()]);
+  const placementFeatureTop10 = buildPlacementFeatureFrequencyTop10(aggregatedRows, totalAppearedRuns);
+  // ⚠️ (2026-09-09 확인) aggregated_metrics 집계가 실시간 데이터보다 밀려 있어서,
+  // "우리 브랜드 등장"(totalAppearedRuns)만큼 표현 데이터가 다 있지는 않다 —
+  // 화면에 이 차이를 숨기지 않기 위해 별도로 세서 캡션에 보여준다.
+  const placementFeatureDataRuns = aggregatedRows.filter(
+    (r) => r.topKeywords !== null && r.topKeywords !== undefined
+  ).length;
   const allStats = buildFeatureGapStats(candidates, roleRows, totalValidRuns);
   const visible = visibleGapFeatures(allStats);
   const sorted = sortForFeatureList(visible);
@@ -474,6 +484,37 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
           </GapFeatureDetailPanel>
         </GapFeatureList>
       </section>
+
+      {placementFeatureTop10.length > 0 && (
+        <section>
+          <h2 className="sec">자리 질문에서 반복된 표현 TOP10</h2>
+          <p className="sec-sub">
+            자리 질문 {placementQueries.length}개에서 우리 브랜드가 등장한 관측 {totalAppearedRuns}건 중, 브랜드를
+            설명할 때 반복된 표현을 빈도순으로 모았어요. 완전히 똑같은 글자로만 묶었어서, 뜻은 같은데 표현이 조금
+            다르면(예: &quot;협진&quot; · &quot;협진 시스템&quot;) 따로 잡힐 수 있어요.
+            {placementFeatureDataRuns < totalAppearedRuns && (
+              <>
+                {' '}
+                ⚠️ 표현 데이터는 {placementFeatureDataRuns}건까지만 집계돼 있어요 — 나머지{' '}
+                {totalAppearedRuns - placementFeatureDataRuns}건은 표현이 없어서가 아니라, 그 날짜 집계가 아직
+                안 돼 있어서예요.
+              </>
+            )}
+          </p>
+          <div className="expr-list">
+            {placementFeatureTop10.map((f, i) => (
+              <div className="expr-row" key={f.keyword}>
+                <p className="en">
+                  {i + 1}. {f.keyword}
+                </p>
+                <span className="ec">
+                  {Math.round(f.rate * 100)}% · {f.appearedRuns}회 중 {f.count}회
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {heroSentence && (
         <div className="tip-box">
