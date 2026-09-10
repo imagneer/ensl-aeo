@@ -1661,7 +1661,8 @@ export async function fetchBrandFeatureConflictsForDiagnosis(
 export type ReviewItemType =
   | 'brand_one_liner' // 브랜드 인지 화면 — 본문 한 줄 (반복확인/초기한줄)
   | 'brand_one_liner_conflict' // 브랜드 인지 화면 — '잘못된인지' 행
-  | 'feature_conflict_summary'; // 브랜드 인지 화면 3번 칸 — "서로 다르게 설명하는 지점"
+  | 'feature_conflict_summary' // 브랜드 인지 화면 3번 칸 — "서로 다르게 설명하는 지점"
+  | 'narrative_lesson'; // "인지와 추천, 그 사이" 화면 — "엔슬의 제안" 문장
 
 export type ReviewItemStatus = 'pending' | 'approved' | 'rejected';
 
@@ -1705,6 +1706,13 @@ export interface ReviewItemToSave {
   generationRound?: number; // 기본 1
   previousItemId?: string | null; // 반려→재생성 이력 체인
   evidence?: unknown;
+  /**
+   * ⚠️ 사람이 직접 쓴 문장을 최초 1건 시드로 등록할 때만 쓴다(예: "엔슬의
+   * 제안" narrative_lesson 최초 문구, 2026-09-10). AI가 생성한 문장은 항상
+   * 기본값(pending)으로 들어가서 /review를 거쳐야 한다 — 이 옵션으로
+   * 그 절차를 우회하는 걸 일반적인 저장 경로로 쓰지 말 것.
+   */
+  seedApproved?: { finalText: string };
 }
 
 export async function saveReviewItem(input: ReviewItemToSave): Promise<string | null> {
@@ -1721,6 +1729,9 @@ export async function saveReviewItem(input: ReviewItemToSave): Promise<string | 
       generation_round: input.generationRound ?? 1,
       previous_item_id: input.previousItemId ?? null,
       evidence: input.evidence ?? null,
+      ...(input.seedApproved
+        ? { status: 'approved' as ReviewItemStatus, final_text: input.seedApproved.finalText }
+        : {}),
     })
     .select('id')
     .single();
@@ -3251,4 +3262,186 @@ export async function fetchAggregatedKeywordRowsForQueries(
     topKeywords: row.top_keywords,
     competitorData: row.competitor_data,
   }));
+}
+
+// ── "인지와 추천, 그 사이" 화면 (Day23, 2026-09-10) ──
+
+/**
+ * 소개(인지 질문) 또는 추천(자리 질문) 문맥에서, 우리 브랜드가 등장한
+ * mentions의 source_urls(=사용한 것, cited)를 전부 펼쳐서 반환한다 —
+ * 인용 "건수" 기준 비율을 내려면 distinct 처리 없이 중복 그대로 둬야 한다
+ * (같은 URL이 여러 mention에 반복 인용되면 그만큼 여러 번 세야 함).
+ */
+export async function fetchTargetMentionSourceUrls(
+  brandId: string,
+  queryType: '인지' | '자리',
+  periodStart: string,
+  periodEnd: string
+): Promise<string[]> {
+  const { data: queryRows, error: queryError } = await supabaseAdmin
+    .from('queries')
+    .select('id')
+    .eq('brand_id', brandId)
+    .eq('query_type', queryType);
+
+  if (queryError || !queryRows || queryRows.length === 0) {
+    if (queryError) console.error('출처 분석용 queries 조회 실패:', queryError);
+    return [];
+  }
+
+  const { data: snapshotRows, error: snapshotError } = await supabaseAdmin
+    .from('snapshots')
+    .select('id')
+    .in(
+      'query_id',
+      queryRows.map((q) => q.id)
+    )
+    .eq('status', 'success')
+    .eq('search_performed', true)
+    .gte('executed_at', periodStart)
+    .lt('executed_at', periodEnd);
+
+  if (snapshotError || !snapshotRows || snapshotRows.length === 0) {
+    if (snapshotError) console.error('출처 분석용 snapshots 조회 실패:', snapshotError);
+    return [];
+  }
+
+  // ⚠️ snapshotIds를 한 번에 다 .in()에 넣으면 인지 질문처럼 하루 3회씩
+  // 모이는 경우(자리 질문 스케줄의 3배) URL이 너무 길어져서 그냥 "Bad
+  // Request"로 실패한다(2026-09-10 실측 확인) — snapshot_id 목록 자체를
+  // 청크로 나누고, 그 안에서도 mentions가 1,000행 넘으면 또 잘릴 수 있어서
+  // (2026-09-09 발견한 것과 같은 종류의 함정) .range()로 페이지까지 나눠 받는다.
+  const snapshotIds = snapshotRows.map((s) => s.id);
+  const ID_CHUNK_SIZE = 150;
+  const PAGE_SIZE = 1000;
+  const urls: string[] = [];
+
+  for (let chunkStart = 0; chunkStart < snapshotIds.length; chunkStart += ID_CHUNK_SIZE) {
+    const idChunk = snapshotIds.slice(chunkStart, chunkStart + ID_CHUNK_SIZE);
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data: page, error } = await supabaseAdmin
+        .from('mentions')
+        .select('source_urls')
+        .eq('is_target', true)
+        .in('snapshot_id', idChunk)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.error('출처 분석용 mentions 조회 실패:', error);
+        break;
+      }
+      if (!page || page.length === 0) break;
+      for (const row of page) urls.push(...(row.source_urls ?? []));
+      if (page.length < PAGE_SIZE) break;
+    }
+  }
+
+  return urls;
+}
+
+export interface BrandOwnedChannel {
+  pattern: string;
+  label: string;
+}
+
+/** 온보딩 Step2(A안, 개발 미착수)가 붙기 전까지는 코난이 직접 조사해서
+ *  시드로 넣어둔 값만 있다(docs/day23-narrative-screen-schema.sql). */
+export async function fetchBrandOwnedChannels(brandId: string): Promise<BrandOwnedChannel[]> {
+  const { data, error } = await supabaseAdmin
+    .from('brand_owned_channels')
+    .select('pattern, label')
+    .eq('brand_id', brandId);
+
+  if (error) {
+    console.error('brand_owned_channels 조회 실패:', error);
+    return [];
+  }
+  return (data ?? []).map((row) => ({ pattern: row.pattern, label: row.label }));
+}
+
+export interface PlacementNarrativeTop10Item {
+  keyword: string;
+  count: number;
+  rate: number;
+}
+
+export interface StoredPlacementNarrativeTop10 {
+  diagnosisId: string;
+  brandId: string;
+  items: PlacementNarrativeTop10Item[];
+  appearedRuns: number;
+  computedAt: string;
+}
+
+export async function fetchPlacementNarrativeTop10(
+  diagnosisId: string
+): Promise<StoredPlacementNarrativeTop10 | null> {
+  const { data, error } = await supabaseAdmin
+    .from('placement_narrative_top10')
+    .select('diagnosis_id, brand_id, items, appeared_runs, computed_at')
+    .eq('diagnosis_id', diagnosisId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('placement_narrative_top10 조회 실패:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  return {
+    diagnosisId: data.diagnosis_id,
+    brandId: data.brand_id,
+    items: data.items,
+    appearedRuns: data.appeared_runs,
+    computedAt: data.computed_at,
+  };
+}
+
+export async function savePlacementNarrativeTop10(input: {
+  diagnosisId: string;
+  brandId: string;
+  items: PlacementNarrativeTop10Item[];
+  appearedRuns: number;
+}): Promise<void> {
+  const { error } = await supabaseAdmin.from('placement_narrative_top10').upsert(
+    {
+      diagnosis_id: input.diagnosisId,
+      brand_id: input.brandId,
+      items: input.items,
+      appeared_runs: input.appearedRuns,
+    },
+    { onConflict: 'diagnosis_id' }
+  );
+
+  if (error) {
+    console.error('placement_narrative_top10 저장 실패:', error);
+  }
+}
+
+/** 아직 이 표가 없는(=대상 크론이 아직 안 돌았거나 실패한) completed
+ *  진단을 찾는다 — /api/compute-placement-narrative가 매일 이걸로 대상을
+ *  고른다. 완료 후 표가 생기면 다시 안 걸리는 게 재시도 안전장치다. */
+export async function fetchCompletedDiagnosesMissingPlacementNarrative(): Promise<
+  { diagnosisId: string; brandId: string; brandName: string; startedAt: string; endedAt: string }[]
+> {
+  const { data, error } = await supabaseAdmin
+    .from('diagnoses')
+    .select('id, brand_id, started_at, ended_at, brands(name), placement_narrative_top10(diagnosis_id)')
+    .eq('status', 'completed');
+
+  if (error) {
+    console.error('placement_narrative_top10 대상 진단 조회 실패:', error);
+    return [];
+  }
+
+  return (data ?? [])
+    .filter((row: any) => !row.placement_narrative_top10 || row.placement_narrative_top10.length === 0)
+    .map((row: any) => ({
+      diagnosisId: row.id,
+      brandId: row.brand_id,
+      brandName: row.brands?.name ?? '',
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+    }));
 }
