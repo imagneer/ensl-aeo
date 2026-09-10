@@ -3188,12 +3188,26 @@ export async function fetchAggregatedKeywordRowsForQueries(
 // ── "인지와 추천, 그 사이" 화면 (Day23, 2026-09-10) ──
 
 /**
- * 소개(인지 질문) 또는 추천(자리 질문) 문맥에서, 우리 브랜드가 등장한
- * mentions의 source_urls(=사용한 것, cited)를 전부 펼쳐서 반환한다 —
+ * 소개(인지 질문) 또는 추천(자리 질문) 문맥에서, 그 답변(snapshot) 전체에
+ * 달린 인용 URL을 전부 펼쳐서 반환한다 — 우리 브랜드 mentions의
+ * source_urls만이 아니라 그 답변에 함께 등장한 경쟁사 mentions의
+ * source_urls까지 다 포함한다(2026-09-10 정정, 루아 확인).
+ *
+ * ⚠️ 왜 mentions.is_target=true로 좁히지 않는가: citation-linker.ts의
+ * 세그먼트 경계 판정에 알려진 버그가 있어서(2026-09-03 발견, "naver_ai_
+ * briefing 응답의 출처 목록·푸터가 문단 경계 안에 같이 포함되거나, 인접한
+ * 다른 브랜드 설명 문장이 섞여 들어가는 사례"), "이 인용이 정확히 우리
+ * 브랜드 문단 것"이라는 판정 자체를 이 지표에서는 신뢰하지 않기로 했다.
+ * 대신 "이 답변이 인용한 출처 전체"를 그대로 세면 그 버그의 영향을 안
+ * 받는다 — 다만 그만큼 "이 인용이 정확히 누구 얘기였나"는 이 숫자로는
+ * 알 수 없다(이 화면의 출처 분석은 애초에 브랜드별이 아니라 "이 주제를
+ * 다룰 때 AI가 전반적으로 어디를 보는가"를 보는 지표라 이 트레이드오프를
+ * 받아들인다).
+ *
  * 인용 "건수" 기준 비율을 내려면 distinct 처리 없이 중복 그대로 둬야 한다
  * (같은 URL이 여러 mention에 반복 인용되면 그만큼 여러 번 세야 함).
  */
-export async function fetchTargetMentionSourceUrls(
+export async function fetchAnswerSourceUrls(
   brandId: string,
   queryType: '인지' | '자리',
   periodStart: string,
@@ -3243,7 +3257,6 @@ export async function fetchTargetMentionSourceUrls(
       const { data: page, error } = await supabaseAdmin
         .from('mentions')
         .select('source_urls')
-        .eq('is_target', true)
         .in('snapshot_id', idChunk)
         .order('id', { ascending: true })
         .range(from, from + PAGE_SIZE - 1);

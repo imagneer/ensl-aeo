@@ -10,7 +10,7 @@ import {
   fetchLatestBrandOneLiner,
   fetchPlacementNarrativeTop10,
   fetchBrandOwnedChannels,
-  fetchTargetMentionSourceUrls,
+  fetchAnswerSourceUrls,
   fetchCurrentReviewItemsForDiagnosis,
   type AggregatedKeywordRow,
 } from '@/lib/supabase';
@@ -170,8 +170,8 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
     fetchGapFeatureUniverse(brandId, diagnosis.id),
     fetchPlacementNarrativeTop10(diagnosis.id),
     fetchBrandOwnedChannels(brandId),
-    fetchTargetMentionSourceUrls(brandId, '인지', periodStart, periodEnd),
-    fetchTargetMentionSourceUrls(brandId, '자리', periodStart, periodEnd),
+    fetchAnswerSourceUrls(brandId, '인지', periodStart, periodEnd),
+    fetchAnswerSourceUrls(brandId, '자리', periodStart, periodEnd),
     fetchCurrentReviewItemsForDiagnosis(diagnosis.id, 'narrative_lesson', sessionClient),
   ]);
 
