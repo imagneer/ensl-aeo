@@ -84,6 +84,12 @@ function CompetitionSection({
       ) : (
         <p className="cap">AI가 함께 언급한 특징</p>
       )}
+      {stats.targetTopKeywords.length > 0 && stats.keywordDataRuns < stats.appearedRuns && (
+        <p className="cap" style={{ color: 'var(--text-muted)' }}>
+          ⚠️ 표현 데이터는 {stats.appearedRuns}건 중 {stats.keywordDataRuns}건까지만 있어요 — 나머지는 표현이
+          없어서가 아니라, 그 날짜 집계가 아직 안 돼 있어서예요.
+        </p>
+      )}
       {rowsToShow.length === 0 ? (
         <p className="es-text" style={{ marginBottom: 20 }}>
           아직 확인된 브랜드가 없어요.

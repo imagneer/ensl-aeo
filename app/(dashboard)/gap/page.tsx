@@ -285,6 +285,12 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
                   </div>
                   <span className="expr-meta">{stat.placementTotalValidRuns}개 유효 답변</span>
                 </div>
+                {placementFeatureDataRuns < totalAppearedRuns && (
+                  <p className="cap" style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                    ⚠️ 표현 데이터는 {totalAppearedRuns}건 중 {placementFeatureDataRuns}건까지만 있어요 — 나머지는
+                    집계가 아직 안 된 날짜라, 여기 없는 표현이 있을 수 있어요.
+                  </p>
+                )}
                 <div className="expr-list">
                   {competitorExpressions.map((e, i) => (
                     <div className="expr-row" key={i}>
@@ -447,6 +453,13 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
             ))}
             <p className="compare-caption">
               경쟁사 데이터는 아직 근거 연결 여부까지 판정되지 않았어요. 함께 언급된 횟수만 보여드려요.
+              {placementFeatureDataRuns < totalAppearedRuns && (
+                <>
+                  {' '}
+                  ⚠️ 표현 데이터는 {totalAppearedRuns}건 중 {placementFeatureDataRuns}건까지만 있어요 — 나머지는
+                  집계가 아직 안 된 날짜라, 여기 없는 표현이 있을 수 있어요.
+                </>
+              )}
             </p>
           </div>
         </div>

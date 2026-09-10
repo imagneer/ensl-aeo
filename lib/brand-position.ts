@@ -135,6 +135,14 @@ export interface QueryPositionStats {
   /** selectTopCompetitors 결과 그대로 — 타겟 포함, 등장률 내림차순. */
   competitorRows: CompetitorBrandRow[];
   targetTopKeywords: TopKeyword[];
+  /**
+   * targetTopKeywords가 실제로 몇 건의 관측(daily 집계 행)에서 나온
+   * 표현인지 — appearedRuns(우리 브랜드가 등장한 관측 수)보다 작을 수
+   * 있다. daily 집계(aggregated_metrics)가 실시간 데이터보다 지연될 수
+   * 있어서(2026-09-10 확인, lib/gap.ts의 같은 문제와 동일 원인)다 —
+   * "표현이 없어서"가 아니라 "그 날짜 집계가 아직 안 돼서"다.
+   */
+  keywordDataRuns: number;
   topCompetitor: { name: string; brandId: string | null; rate: number; topKeywords: TopKeyword[] } | null;
   /** null이면 화면에서 해석 문장 대신 폴백 UI를 써야 한다. */
   interpretation: string | null;
@@ -177,6 +185,9 @@ export function buildQueryPositionStats(params: {
   );
 
   const targetTopKeywords = combineTopKeywords(params.keywordRows.map((r) => r.topKeywords));
+  const keywordDataRuns = params.keywordRows.filter(
+    (r) => r.topKeywords !== null && r.topKeywords !== undefined
+  ).length;
 
   const topCompetitorRow = competitorRows.find((r) => !r.isTarget) ?? null;
   let topCompetitor: QueryPositionStats['topCompetitor'] = null;
@@ -232,6 +243,7 @@ export function buildQueryPositionStats(params: {
     representativeSnapshot,
     competitorRows,
     targetTopKeywords,
+    keywordDataRuns,
     topCompetitor,
     interpretation,
   };
