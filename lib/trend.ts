@@ -240,3 +240,122 @@ export function classifyDailyTrend(points: DailyValuePoint[]): TrendDirectionRes
     consecutiveDays,
   };
 }
+
+// ── 자리 질문 전환 유형 (작업지시서 §3 "전환 유형별 근거 4가지") ──
+
+export type PlacementTransitionType = 'rise' | 'start' | 'fall' | 'comp';
+
+export interface PlacementQueryTransition {
+  queryId: string;
+  transitionType: PlacementTransitionType;
+  ownTrend: TrendDirectionResult; // confidence(확인된 추세/관찰 중)는 이 값을 그대로 화면에 노출해야 함
+  periodARate: number | null; // 초반 구간 평균 노출률 (sum mentionCount / sum totalRuns)
+  periodBRate: number | null; // 후반 구간 평균 노출률
+  /** transitionType==='comp'일 때만 채워짐 — 같은 구간에서 부상한 경쟁 브랜드 */
+  risingCompetitor: { brandId: string; name: string; trend: TrendDirectionResult } | null;
+}
+
+function averageRate(points: { totalRuns: number; mentionCount: number }[]): number | null {
+  const totalRuns = points.reduce((sum, p) => sum + p.totalRuns, 0);
+  if (totalRuns === 0) return null;
+  const mentionCount = points.reduce((sum, p) => sum + p.mentionCount, 0);
+  return mentionCount / totalRuns;
+}
+
+/**
+ * 자리 질문 하나의 전환 유형을 판정한다.
+ *
+ * @param periodAPoints  periodA(초반) 구간의 day별 합산 값(lib/supabase.ts
+ *   fetchDailyMetricsAcrossEngines 결과 중 그 구간에 속하는 것만)
+ * @param periodBPoints  periodB(후반) 구간의 day별 합산 값
+ * @param fullSeries     periodA.start ~ periodB.end 전체 구간의 day별 값
+ *   (classifyDailyTrend가 "최근 날짜부터 거슬러 3일 연속"을 봐야 해서
+ *   A/B로 쪼개지 않은 전체가 필요하다)
+ * @param competitorSeries  같은 전체 구간의 경쟁사별 day별 값(같은 방식으로
+ *   classifyDailyTrend를 돌려서 "경쟁사도 상승 중인지" 확인하는 데 쓴다)
+ *
+ * 판정 순서 (2026-09-10 루아 확인):
+ *  1. 초반(periodA) 구간에 mentionCount 합이 0이었는데 후반엔 나타났으면
+ *     → 'start'(미선택→선택 시작). 임계값(%)을 안 쓰는 이유: 매니페스토
+ *     3원칙("계산법 설명 못하는 숫자는 미게시") — "한 번도 안 나타났다"는
+ *     %기준 없이 그 자체로 설명 가능하다.
+ *  2. 그 외 방향이 'down'이면, 같은 구간 경쟁사 중 confirmed+up인 곳이
+ *     있는지 확인 → 있으면 'comp'(경쟁 브랜드 부상), 없으면 'fall'.
+ *  3. 그 외는 'rise'.
+ *
+ * ⚠️ classifyDailyTrend(fullSeries)가 'watching'(방향 불명)을 돌려줘도
+ *    유형은 매겨야 해서, 그 경우엔 periodA/B 평균의 부호로 대신 방향을
+ *    잡는다(effectiveDirection) — "유형"(큰 그림의 방향)과 "확신도"(며칠
+ *    연속 확인됐는지)는 서로 다른 축이라, 확신도가 낮다고 유형 자체를
+ *    안 매기면 화면에 아무것도 못 보여준다. 대신 ownTrend.confidence를
+ *    반드시 같이 노출해서 "확인된 추세"와 "관찰 중인 신호"를 구분해야
+ *    한다(작업지시서 §3) — 이건 화면 구현 단계에서 놓치면 안 되는 지점.
+ */
+export function classifyPlacementTransition(
+  queryId: string,
+  periodAPoints: { totalRuns: number; mentionCount: number }[],
+  periodBPoints: { totalRuns: number; mentionCount: number }[],
+  fullSeries: DailyValuePoint[],
+  competitorSeries: { brandId: string; name: string; series: DailyValuePoint[] }[]
+): PlacementQueryTransition {
+  const periodARate = averageRate(periodAPoints);
+  const periodBRate = averageRate(periodBPoints);
+  const periodAMentionTotal = periodAPoints.reduce((sum, p) => sum + p.mentionCount, 0);
+
+  const ownTrend = classifyDailyTrend(fullSeries);
+  const fallbackDirection: TrendDirection = (periodBRate ?? 0) - (periodARate ?? 0) >= 0 ? 'up' : 'down';
+  const effectiveDirection = ownTrend.direction === 'unknown' ? fallbackDirection : ownTrend.direction;
+
+  if (periodAMentionTotal === 0 && (periodBRate ?? 0) > 0) {
+    return { queryId, transitionType: 'start', ownTrend, periodARate, periodBRate, risingCompetitor: null };
+  }
+
+  if (effectiveDirection === 'down') {
+    for (const competitor of competitorSeries) {
+      const competitorTrend = classifyDailyTrend(competitor.series);
+      if (competitorTrend.confidence === 'confirmed' && competitorTrend.direction === 'up') {
+        return {
+          queryId,
+          transitionType: 'comp',
+          ownTrend,
+          periodARate,
+          periodBRate,
+          risingCompetitor: { brandId: competitor.brandId, name: competitor.name, trend: competitorTrend },
+        };
+      }
+    }
+    return { queryId, transitionType: 'fall', ownTrend, periodARate, periodBRate, risingCompetitor: null };
+  }
+
+  return { queryId, transitionType: 'rise', ownTrend, periodARate, periodBRate, risingCompetitor: null };
+}
+
+/**
+ * 자리 질문 여러 개 중 화면에 보여줄 상위 N개(기본 4개)를 고른다.
+ *
+ * 1순위: ownTrend.confidence==='confirmed'(3일 연속 확인된 변화)인 것들을
+ * |후반 평균 - 초반 평균| 내림차순으로.
+ * 그걸로 다 못 채우면, 나머지('watching')를 같은 기준(|delta| 내림차순)으로
+ * 채운다 — 화면에는 각 항목의 ownTrend.confidence를 그대로 노출해서
+ * "확인된 변화"와 "관찰 중인 신호"를 섞어서 보여주면 안 된다
+ * (2026-09-10 루아 확인).
+ */
+export function selectFeaturedPlacementQueries(
+  transitions: PlacementQueryTransition[],
+  topN = 4
+): PlacementQueryTransition[] {
+  const withDelta = transitions.map((t) => ({
+    transition: t,
+    absDelta: Math.abs((t.periodBRate ?? 0) - (t.periodARate ?? 0)),
+  }));
+
+  const confirmed = withDelta
+    .filter((x) => x.transition.ownTrend.confidence === 'confirmed')
+    .sort((a, b) => b.absDelta - a.absDelta);
+
+  const watching = withDelta
+    .filter((x) => x.transition.ownTrend.confidence !== 'confirmed')
+    .sort((a, b) => b.absDelta - a.absDelta);
+
+  return [...confirmed, ...watching].slice(0, topN).map((x) => x.transition);
+}

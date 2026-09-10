@@ -261,7 +261,7 @@ export async function fetchQueryById(
 
 // ── 수집 결과를 DB에 저장하기 ──
 
-import { ENGINE_CONFIG } from './engine-config';
+import { ENGINE_CONFIG, ENGINE_NAMES } from './engine-config';
 import type { ParseResult, OverallMention } from './parser';
 import type { RetrievedSource, CitedSpan } from './types';
 
@@ -639,6 +639,9 @@ export interface DailyQueryMetric {
   totalRuns: number;
   mentionCount: number;
   visibilityRate: number | null; // totalRuns=0이면 null (aggregator.ts 규칙 그대로 — "0"이 아니라 "판정 불가")
+  /** 이 날짜의 경쟁사별 노출 현황(jsonb 그대로) — "경쟁 브랜드 부상" 판정에 쓴다.
+   *  AggregatedMetricToSave.competitorData와 완전히 같은 값(단일 진실 소스, 별도 파생 없음). */
+  competitorData: AggregatedMetricToSave['competitorData'];
 }
 
 /**
@@ -646,10 +649,11 @@ export interface DailyQueryMetric {
  * ~ periodEnd 미만, UTC ISO)으로 잘라서 가져온다.
  *
  * fetchRecentDailyMetrics(위, Day13 알림 판정용)와 다른 점: 그쪽은 "최근 N개
- * 행"(limit 기준, 기간 없음)만 가져오고 visibility_rate는 안 돌려준다 —
- * 알림 판정엔 mentionCount=0 여부만 있으면 되기 때문. 변화 추이 화면은
- * 정해진 비교 구간(진단 내 3일 vs 3일, 또는 진단 대 진단)의 값을 그래프로
- * 그려야 해서 범위 조회 + visibility_rate가 둘 다 필요해 별도로 뺐다.
+ * 행"(limit 기준, 기간 없음)만 가져오고 visibility_rate·competitor_data는 안
+ * 돌려준다 — 알림 판정엔 mentionCount=0 여부만 있으면 되기 때문. 변화 추이
+ * 화면은 정해진 비교 구간(진단 내 3일 vs 3일, 또는 진단 대 진단)의 값을
+ * 그래프로 그리고, "경쟁 브랜드가 같은 자리에서 부상했는지"까지 판정해야
+ * 해서 범위 조회 + visibility_rate + competitor_data가 다 필요해 별도로 뺐다.
  *
  * ⚠️ anon이 아니라 supabaseAdmin을 쓴다 — fetchAggregatedMetrics(위)와 같은
  *    이유: aggregated_metrics에 anon 읽기 권한이 있는지 아직 확인 안 됐다
@@ -664,7 +668,7 @@ export async function fetchDailyMetricsForRange(params: {
 }): Promise<DailyQueryMetric[]> {
   const { data, error } = await supabaseAdmin
     .from('aggregated_metrics')
-    .select('period_start, total_runs, mention_count, visibility_rate')
+    .select('period_start, total_runs, mention_count, visibility_rate, competitor_data')
     .eq('query_id', params.queryId)
     .eq('brand_id', params.brandId)
     .eq('engine', params.engine)
@@ -684,7 +688,84 @@ export async function fetchDailyMetricsForRange(params: {
     totalRuns: row.total_runs,
     mentionCount: row.mention_count,
     visibilityRate: row.visibility_rate,
+    competitorData: row.competitor_data,
   }));
+}
+
+export interface DailyCombinedMetric {
+  periodStart: string;
+  totalRuns: number; // 6개 엔진 합산
+  mentionCount: number; // 6개 엔진 합산
+  visibilityRate: number | null; // totalRuns=0이면 null
+  /** 경쟁사별 그날 언급 횟수(6개 엔진 합산) — brandId를 키로 함. */
+  competitorMentionCounts: Record<string, { name: string; mentionCount: number }>;
+}
+
+/**
+ * fetchDailyMetricsForRange를 6개 엔진 전부에 대해 불러서 날짜별로 합산한다.
+ *
+ * 변화 추이 화면의 "18%"는 특정 엔진 하나가 아니라 그날 6개 엔진 전체를
+ * 합친 숫자다("전체 인지 등장률"과 같은 정의, 2026-09-10 루아 확인) — 그래서
+ * 엔진별로 따로 그리지 않고 이 함수가 미리 합쳐서 낸다.
+ *
+ * 경쟁사 mentionCount의 분모도 이 날의 합산 totalRuns와 같다(타겟과 같은
+ * 배치에서 나온 값이라 분모를 따로 셀 필요가 없다) — 호출부가 경쟁사
+ * 노출률을 구할 때는 이 totalRuns를 그대로 나눠쓰면 된다.
+ *
+ * ⚠️ Promise.all을 쓴다(이 파일의 다른 여러-엔진 호출과 달리 allSettled가
+ * 아님) — fetchDailyMetricsForRange는 내부에서 에러를 전부 잡아서 항상
+ * 빈 배열을 반환하지, 절대 reject하지 않는다. 그래서 여기서는 "하나 실패해도
+ * 나머지는 살린다"는 목적을 Promise.all로도 이미 만족한다(reject할 게 없어서
+ * allSettled와 결과가 같다) — CLAUDE.md가 금지하는 "Promise.all로 여러 엔진
+ * API 호출"은 실패 가능한 외부 API 호출(수집) 얘기이지, 이미 실패를 삼킨
+ * DB 조회 함수를 다시 감싸는 것까지 금지하는 건 아니다.
+ */
+export async function fetchDailyMetricsAcrossEngines(params: {
+  queryId: string;
+  brandId: string;
+  periodStart: string;
+  periodEnd: string;
+}): Promise<DailyCombinedMetric[]> {
+  const perEngine = await Promise.all(
+    ENGINE_NAMES.map((engine) => fetchDailyMetricsForRange({ ...params, engine }))
+  );
+
+  const byDay = new Map<
+    string,
+    { totalRuns: number; mentionCount: number; competitors: Map<string, { name: string; mentionCount: number }> }
+  >();
+
+  for (const rows of perEngine) {
+    for (const row of rows) {
+      const entry = byDay.get(row.periodStart) ?? {
+        totalRuns: 0,
+        mentionCount: 0,
+        competitors: new Map<string, { name: string; mentionCount: number }>(),
+      };
+      entry.totalRuns += row.totalRuns;
+      entry.mentionCount += row.mentionCount;
+
+      if (row.competitorData) {
+        for (const [brandId, c] of Object.entries(row.competitorData)) {
+          const existing = entry.competitors.get(brandId) ?? { name: c.name, mentionCount: 0 };
+          existing.mentionCount += c.mentionCount;
+          entry.competitors.set(brandId, existing);
+        }
+      }
+
+      byDay.set(row.periodStart, entry);
+    }
+  }
+
+  return Array.from(byDay.entries())
+    .map(([periodStart, v]) => ({
+      periodStart,
+      totalRuns: v.totalRuns,
+      mentionCount: v.mentionCount,
+      visibilityRate: v.totalRuns > 0 ? v.mentionCount / v.totalRuns : null,
+      competitorMentionCounts: Object.fromEntries(v.competitors),
+    }))
+    .sort((a, b) => new Date(a.periodStart).getTime() - new Date(b.periodStart).getTime());
 }
 
 // ── alerts 테이블 (Day 13) ──
