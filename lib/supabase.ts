@@ -687,47 +687,6 @@ export async function fetchDailyMetricsForRange(params: {
   }));
 }
 
-export interface ConsecutiveMissResult {
-  consecutiveDays: number;
-  periods: RecentDailyMetric[]; // 실제로 연속 미노출로 카운트된 날짜들 (최신순)
-}
-
-/**
- * 최근 daily 집계(최신순 정렬)를 앞에서부터 훑어서, mention_count=0인 날이
- * 며칠 연속인지 센다. (규칙 1, 2026-08-19 확인)
- *
- * 판정:
- *   - totalRuns > 0 && mentionCount === 0 → "미노출 확인됨" (연속에 포함)
- *   - totalRuns === 0                     → "판정 불가"(수집 실패/스킵) → 연속 끊음
- *   - mentionCount > 0                    → "노출됨" → 연속 끊음
- *   - 하루 이상 간격이 빈 경우(그날 행 자체가 없음, 즉 aggregator 규칙 E에서
- *     스냅샷 시도조차 없었던 날) → 판정 불가와 동일하게 연속 끊음
- *
- * 왜 판정 불가를 미노출로 안 세는가: totalRuns=0은 "우리가 못 쟀다"는
- * 뜻이지 "안 나왔다"는 뜻이 아니다. 못 잰 걸 미노출로 세면 수집 인프라
- * 장애를 브랜드 노출 문제로 오판하게 된다 — 규칙 2(경쟁사 동조)와 같은 함정.
- */
-export function checkConsecutiveMissDays(
-  recentMetrics: RecentDailyMetric[]
-): ConsecutiveMissResult {
-  const streak: RecentDailyMetric[] = [];
-
-  for (const row of recentMetrics) {
-    if (row.totalRuns === 0) break;      // 판정 불가
-    if (row.mentionCount > 0) break;     // 노출됨
-
-    if (streak.length > 0) {
-      const prevDate = new Date(streak[streak.length - 1].periodStart);
-      const currDate = new Date(row.periodStart);
-      const diffDays = (prevDate.getTime() - currDate.getTime()) / (24 * 60 * 60 * 1000);
-      if (diffDays !== 1) break; // 날짜가 하루 간격이 아님 → 그 사이 행이 통째로 없음
-    }
-
-    streak.push(row);
-  }
-
-  return { consecutiveDays: streak.length, periods: streak };
-}
 // ── alerts 테이블 (Day 13) ──
 
 export interface StoredAlert {
