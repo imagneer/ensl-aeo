@@ -4,82 +4,82 @@ import {
   fetchTargetBrands,
   fetchLatestDiagnosis,
   fetchActiveQueries,
+  fetchKnownBrands,
   fetchQuerySnapshotsWithMentionsBatch,
   fetchAggregatedKeywordRowsForQueries,
-  fetchBrandExpressionsByIds,
-  fetchMentionFeatureRolesForPlacement,
-  fetchPlacementMentionsForRoleJudgment,
-  fetchGapFeatureNarratives,
-  fetchKnownBrands,
-  type PlacementMentionForRoleJudgment,
-  type MentionFeatureRoleRow,
+  fetchLatestBrandOneLiner,
+  fetchPlacementNarrativeTop10,
+  fetchBrandOwnedChannels,
+  fetchTargetMentionSourceUrls,
+  fetchCurrentReviewItemsForDiagnosis,
+  type AggregatedKeywordRow,
 } from '@/lib/supabase';
 import { kstDayBoundsUtc, todayKST } from '@/lib/aggregator';
-import { fetchGapFeatureUniverse, getBrandSegmentText } from '@/lib/mention-feature-roles';
-import {
-  buildFeatureGapStats,
-  sumPlacementTotalValidRuns,
-  sumPlacementAppearedRuns,
-  buildPlacementFeatureFrequencyTop10,
-  buildAwarenessFeatureTop10,
-  selectGapHero,
-  sortForFeatureList,
-  visibleGapFeatures,
-  buildHeroSentence,
-  buildFeatureConclusionSentence,
-  computeCompetitorFeatureMentions,
-  computeCompetitorFeatureExpressions,
-  GAP_PILL_LABEL,
-  type FeatureGapStat,
-} from '@/lib/gap';
-import {
-  MIN_RUNS_FOR_JUDGMENT,
-  classifyObservationConfidence,
-  OBSERVATION_CONFIDENCE_LABEL,
-} from '@/lib/badge-thresholds';
-import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
-import type { KnownBrand } from '@/lib/parser';
-import { GapTipsModal } from '@/components/GapTipsModal';
-import { GapFeatureList, GapFeatureRow, GapFeatureDetailPanel } from '@/components/GapFeatureList';
+import { fetchGapFeatureUniverse } from '@/lib/mention-feature-roles';
+import { buildAwarenessFeatureTop10 } from '@/lib/gap';
+import { buildQueryPositionStats, selectHeroQuery } from '@/lib/brand-position';
+import { buildSourceAnalysis, type SourceAnalysisResult } from '@/lib/source-analysis';
 
-function engineLabel(engine: string): string {
-  return ENGINE_CONFIG[engine as EngineName]?.label ?? engine;
+/** "9월 8일" — 사람 검토 완료 배지용. reviewed_at은 UTC ISO라 KST로 바꿔서 표시. */
+function formatKstDate(isoUtc: string): string {
+  return new Date(isoUtc).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric' });
 }
 
-function dateLabel(executedAt: string): string {
-  return new Date(executedAt).toLocaleDateString('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    month: 'long',
-    day: 'numeric',
-  });
-}
+function SourceAnalysisCard({
+  title,
+  totalLabel,
+  analysis,
+}: {
+  title: string;
+  totalLabel: string;
+  analysis: SourceAnalysisResult;
+}) {
+  const top5 = analysis.topDomains.slice(0, 5);
+  const rest = analysis.topDomains.slice(5, 15);
+  const ownedPct = Math.round(analysis.ownedRate * 100);
 
-interface RepresentativeMention {
-  engine: string;
-  executedAt: string;
-  excerpt: string;
-}
-
-/** roleRows에서 이 특징·역할에 해당하는 mention 하나를 찾아 구간 텍스트를 재구성한다. */
-function findRepresentativeMention(
-  featureName: string,
-  role: 'reason_stated' | 'co_mentioned',
-  roleRows: MentionFeatureRoleRow[],
-  mentionById: Map<string, PlacementMentionForRoleJudgment>,
-  knownBrands: KnownBrand[],
-  ourBrandName: string
-): RepresentativeMention | null {
-  const row = roleRows.find((r) => r.featureText === featureName && r.role === role);
-  if (!row) return null;
-  const mention = mentionById.get(row.mentionId);
-  if (!mention) return null;
-  const text = getBrandSegmentText(mention.rawResponse, knownBrands, ourBrandName);
-  if (!text) return null;
-  return {
-    engine: mention.engine,
-    executedAt: mention.executedAt,
-    excerpt: text.length > 220 ? `${text.slice(0, 220)}…` : text,
-  };
+  return (
+    <div className="narrative-card" style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border-strong)' }}>
+      <p className="n-label">{title}</p>
+      <div style={{ display: 'flex', height: 10, borderRadius: 4, overflow: 'hidden', margin: '10px 0 8px' }}>
+        <div style={{ width: `${ownedPct}%`, background: 'var(--text-brand)' }} />
+        <div style={{ width: `${100 - ownedPct}%`, background: 'var(--border-strong)' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 14 }}>
+        <span style={{ color: 'var(--text-brand)', fontWeight: 600 }}>소유 {ownedPct}%</span>
+        <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>외부 {100 - ownedPct}%</span>
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>
+        {totalLabel} · 판정 가능 {analysis.resolvableCount}건 기준(판정불가 {analysis.unresolvableCount}건 제외)
+      </p>
+      <p className="dp-eyebrow" style={{ marginBottom: 8 }}>
+        출처 상위
+      </p>
+      <div className="expr-list">
+        {top5.map((d) => (
+          <div className="expr-row" key={d.domain}>
+            <p className="en">{d.domain}</p>
+            <span className="ec">{d.count}</span>
+          </div>
+        ))}
+      </div>
+      {rest.length > 0 && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>
+            출처 6~{5 + rest.length}위 더 보기
+          </summary>
+          <div className="expr-list" style={{ marginTop: 6 }}>
+            {rest.map((d) => (
+              <div className="expr-row" key={d.domain}>
+                <p className="en">{d.domain}</p>
+                <span className="ec">{d.count}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
 }
 
 export default async function GapPage({ searchParams }: { searchParams: Promise<{ brand?: string }> }) {
@@ -104,15 +104,16 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
     );
   }
 
-  const [brands, diagnosis, knownBrands, recognitionQueries] = await Promise.all([
+  const [brands, diagnosis, recognitionQueriesAll, placementQueriesAll] = await Promise.all([
     fetchTargetBrands(account.id, sessionClient),
     fetchLatestDiagnosis(brandId, sessionClient),
-    fetchKnownBrands(),
     fetchActiveQueries(['인지']),
+    fetchActiveQueries(['자리']),
   ]);
 
   const brandName = brands.find((b) => b.id === brandId)?.name ?? '이 브랜드';
-  const ourBrand = knownBrands.find((b) => b.brandId === brandId);
+  const recognitionQueries = recognitionQueriesAll.filter((q) => q.brandId === brandId);
+  const placementQueries = placementQueriesAll.filter((q) => q.brandId === brandId);
 
   if (!diagnosis) {
     return (
@@ -122,12 +123,13 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
     );
   }
 
-  const placementQueries = (await fetchActiveQueries(['자리'])).filter((q) => q.brandId === brandId);
-
-  if (placementQueries.length === 0) {
+  // 이 화면의 핵심 데이터(브랜드 한 줄, 추천 표현 TOP10)는 전부 진단 완료
+  // 시점에 한 번 만들어지는 값이라, 진단 중엔 보여줄 게 없다.
+  if (diagnosis.status !== 'completed') {
     return (
       <div className="empty-state">
-        <p className="es-text">아직 등록된 자리 질문이 없어요.</p>
+        <p className="es-text">진단이 아직 진행 중이에요.</p>
+        <p className="es-sub">진단이 끝나면 소개와 추천을 나란히 비교해서 보여드려요.</p>
       </div>
     );
   }
@@ -136,255 +138,82 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
   const periodStart = kstDayBoundsUtc(diagnosis.startedAt).periodStart;
   const periodEnd = kstDayBoundsUtc(periodEndDate).periodEnd;
 
-  // 관측 라벨 — brand-position.ts(Day21)와 같은 공식(CLAUDE.md 알려진 정합성
-  // 이슈 2번: 화면마다 다른 날짜 계산을 쓰면 같은 진단이 다른 숫자로 보인다).
+  // 관측 라벨 — 다른 화면과 같은 공식(CLAUDE.md 알려진 정합성 이슈 2번).
   const diagnosisStart = new Date(`${diagnosis.startedAt}T00:00:00Z`);
   const todayForCount = new Date(`${todayKST()}T00:00:00Z`);
   const daysElapsed =
     Math.round((todayForCount.getTime() - diagnosisStart.getTime()) / (24 * 60 * 60 * 1000)) + 1;
   const dayCount = Math.min(Math.max(daysElapsed, 1), 7);
-  const observationLabel = diagnosis.status === 'completed' ? '7일 관측 완료' : `${dayCount}일차 관측 중`;
+  const observationLabel = '7일 관측 완료';
+  void dayCount; // 완료 상태에서만 이 화면을 보여주므로 항상 "완료" 문구 — 변수는 향후 재사용 대비 보존
+
+  const knownBrands = await fetchKnownBrands();
+  const brandNameById = new Map(knownBrands.map((b) => [b.brandId, b.name]));
+  const knownBrandIdByName = new Map(knownBrands.map((b) => [b.name, b.brandId]));
 
   const placementQueryIds = placementQueries.map((q) => q.id);
 
-  const [candidates, roleRows, recordsByQuery, aggregatedRows, narratives, placementMentions] = await Promise.all([
-    fetchGapFeatureUniverse(brandId, diagnosis.id),
-    fetchMentionFeatureRolesForPlacement(brandId, periodStart, periodEnd),
+  const [
+    oneLinerView,
+    recordsByQuery,
+    keywordRows,
+    candidates,
+    placementTop10,
+    ownedChannels,
+    awarenessUrls,
+    placementUrls,
+    narrativeLessons,
+  ] = await Promise.all([
+    fetchLatestBrandOneLiner(brandId, account.role, sessionClient, diagnosis.id),
     fetchQuerySnapshotsWithMentionsBatch(placementQueryIds, periodStart, periodEnd, sessionClient),
     fetchAggregatedKeywordRowsForQueries(placementQueryIds, periodStart, periodEnd),
-    fetchGapFeatureNarratives(diagnosis.id, sessionClient),
-    fetchPlacementMentionsForRoleJudgment(brandId, periodStart, periodEnd),
+    fetchGapFeatureUniverse(brandId, diagnosis.id),
+    fetchPlacementNarrativeTop10(diagnosis.id),
+    fetchBrandOwnedChannels(brandId),
+    fetchTargetMentionSourceUrls(brandId, '인지', periodStart, periodEnd),
+    fetchTargetMentionSourceUrls(brandId, '자리', periodStart, periodEnd),
+    fetchCurrentReviewItemsForDiagnosis(diagnosis.id, 'narrative_lesson', sessionClient),
   ]);
 
-  // candidates는 brand_feature_candidates(v1.1) 기반이라, 진단이 아직
-  // 'collecting'이라 브랜드 한 줄이 한 번도 합성 안 됐으면 항상 빈
-  // 배열이다(Day20 화면과 같은 게이팅 — view.main.state==='완료' 조건과
-  // 동일한 이유).
-  if (candidates.length === 0) {
-    return (
-      <div className="empty-state">
-        <p className="es-text">아직 인지 쪽 특징이 확인되지 않았어요.</p>
-        <p className="es-sub">브랜드 인지 화면에서 첫 브랜드 한 줄이 만들어지면 이 화면도 채워져요.</p>
-      </div>
-    );
+  // 카드2("추천") — 브랜드 현 위치 화면의 hero 선정 로직을 그대로 재사용.
+  const keywordRowsByQuery = new Map<string, AggregatedKeywordRow[]>();
+  for (const row of keywordRows) {
+    if (!keywordRowsByQuery.has(row.queryId)) keywordRowsByQuery.set(row.queryId, []);
+    keywordRowsByQuery.get(row.queryId)!.push(row);
   }
+  const positionStats = placementQueries.map((q) =>
+    buildQueryPositionStats({
+      queryId: q.id,
+      queryText: q.queryText,
+      records: recordsByQuery.get(q.id) ?? [],
+      brandNameById,
+      keywordRows: keywordRowsByQuery.get(q.id) ?? [],
+      targetBrandName: brandName,
+      knownBrandIdByName,
+    })
+  );
+  const heroQuery = selectHeroQuery(positionStats);
 
-  const totalValidRuns = sumPlacementTotalValidRuns([...recordsByQuery.values()]);
-  const totalAppearedRuns = sumPlacementAppearedRuns([...recordsByQuery.values()]);
-  const placementFeatureTop10 = buildPlacementFeatureFrequencyTop10(aggregatedRows, totalAppearedRuns);
-  const awarenessFeatureTop10 = buildAwarenessFeatureTop10(candidates);
-  // ⚠️ (2026-09-09 확인) aggregated_metrics 집계가 실시간 데이터보다 밀려 있어서,
-  // "우리 브랜드 등장"(totalAppearedRuns)만큼 표현 데이터가 다 있지는 않다 —
-  // 화면에 이 차이를 숨기지 않기 위해 별도로 세서 캡션에 보여준다.
-  const placementFeatureDataRuns = aggregatedRows.filter(
-    (r) => r.topKeywords !== null && r.topKeywords !== undefined
-  ).length;
-  const allStats = buildFeatureGapStats(candidates, roleRows, totalValidRuns);
-  const visible = visibleGapFeatures(allStats);
-  const sorted = sortForFeatureList(visible);
-  const hero = selectGapHero(visible);
+  const awarenessTop10 = buildAwarenessFeatureTop10(candidates);
 
-  const narrativeByFeature = new Map(narratives.map((n) => [n.featureText, n]));
-  const mentionById = new Map(placementMentions.map((m) => [m.mentionId, m]));
+  const ownedPatterns = ownedChannels.map((c) => c.pattern);
+  const awarenessSource = buildSourceAnalysis(awarenessUrls, ownedPatterns);
+  const placementSource = buildSourceAnalysis(placementUrls, ownedPatterns);
 
-  const allEvidenceIds = candidates.flatMap((c) => c.evidenceExpressionIds);
-  const evidenceRows = await fetchBrandExpressionsByIds(allEvidenceIds, sessionClient);
-  const evidenceById = new Map(evidenceRows.map((e) => [e.id, e]));
-  const candidateById = new Map(candidates.map((c) => [c.id, c]));
+  const narrativeLesson = narrativeLessons[0] ?? null;
 
-  const heroSentence = hero ? buildHeroSentence(brandName, hero) : null;
-  const heroCompetitors = hero ? computeCompetitorFeatureMentions(hero.featureName, aggregatedRows) : [];
-
-  function awarenessEvidence(stat: FeatureGapStat) {
-    const candidate = candidateById.get(stat.featureId);
-    const firstId = candidate?.evidenceExpressionIds[0];
-    return firstId ? evidenceById.get(firstId) : undefined;
-  }
-
-  function renderFeatureDetail(stat: FeatureGapStat) {
-    const narrative = narrativeByFeature.get(stat.featureName);
-    const evidence = awarenessEvidence(stat);
-    const reasonEvidence = ourBrand
-      ? findRepresentativeMention(stat.featureName, 'reason_stated', roleRows, mentionById, knownBrands, ourBrand.name)
-      : null;
-    const competitorExpressions = computeCompetitorFeatureExpressions(stat.featureName, aggregatedRows);
-
-    return (
-      <div className="detail-panel">
-        <div className="dp-top">
-          <div>
-            <p className="dp-eyebrow">선택한 특징의 판정 근거</p>
-            <h3 className="dp-name">{stat.featureName}</h3>
-          </div>
-          <span className={`pill ${stat.pill}`}>{GAP_PILL_LABEL[stat.pill!]}</span>
-        </div>
-
-        {stat.isLocationContext && (
-          <div className="dp-card" style={{ marginBottom: 14 }}>
-            <p className="t">왜 조건 정보로 분류했나</p>
-            <p className="q">
-              &apos;{stat.featureName}&apos;은(는) 자리 질문 문구 자체에 이미 포함된 지역·조건이에요. 답변에
-              등장하는 게 추천 근거인지, 질문 조건을 그대로 되풀이한 것인지 구분할 수 없어서, 이런 표현은
-              &apos;특징&apos;이 아니라 &apos;조건 정보&apos;로 따로 분리해요.
-            </p>
-          </div>
-        )}
-
-        {!narrative ? (
-          <p className="note">
-            이 특징은 자리질문 답변에 등장한 횟수(근거 연결 + 동시 언급 합계)가 아직 최소 기준(
-            {MIN_RUNS_FOR_JUDGMENT}회)에 못 미쳐서 판단하기 일러요. {stat.placementReasonStatedCount + stat.placementCoMentionedCount}회 중
-            기준 미달.
-          </p>
-        ) : (
-          <>
-            <div className="stat3">
-              <div className="stat3-card">
-                <p className="k">인지 답변</p>
-                <p className="v">
-                  {stat.awarenessEngineCount}/{stat.awarenessEngineTotal}개 AI
-                </p>
-                <p className="d">인지 질문 답변에서 특징으로 확인</p>
-              </div>
-              <div className="stat3-card">
-                <p className="k">자리 질문 답변</p>
-                <p className="v">
-                  {stat.placementReasonStatedCount}/{stat.placementTotalValidRuns}건
-                </p>
-                <p className="d">추천 근거로 확인 {stat.placementReasonStatedCount}건</p>
-              </div>
-              <div className="stat3-card">
-                <p className="k">판정 신뢰도</p>
-                <p className="v">
-                  {OBSERVATION_CONFIDENCE_LABEL[
-                    classifyObservationConfidence(stat.placementReasonStatedCount + stat.placementCoMentionedCount)
-                  ]}
-                </p>
-                <p className="d">
-                  자리 질문 답변 {stat.placementReasonStatedCount + stat.placementCoMentionedCount}건 관측 기준
-                </p>
-              </div>
-            </div>
-
-            <div className={`why-box${narrative.whyBoxSentences.length < 2 ? ' why-box-single' : ''}`}>
-              <p className="k">왜 이렇게 판정했을까?</p>
-              <p className="headline">{narrative.whyBoxSentences[0]}</p>
-              {narrative.whyBoxSentences.length > 1 && (
-                <ul>
-                  {narrative.whyBoxSentences.slice(1).map((s, i) => (
-                    <li key={i}>{s}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {competitorExpressions.length > 0 && (
-              <>
-                <div className="expr-header">
-                  <div>
-                    <p className="expr-eyebrow">다른 브랜드 답변에서 반복된 표현</p>
-                    <p className="expr-title">이 특징, 다른 브랜드 답변에서 반복된 표현</p>
-                  </div>
-                  <span className="expr-meta">{stat.placementTotalValidRuns}개 유효 답변</span>
-                </div>
-                {placementFeatureDataRuns < totalAppearedRuns && (
-                  <p className="cap" style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
-                    ⚠️ 표현 데이터는 {totalAppearedRuns}건 중 {placementFeatureDataRuns}건까지만 있어요 — 나머지는
-                    집계가 아직 안 된 날짜라, 여기 없는 표현이 있을 수 있어요.
-                  </p>
-                )}
-                <div className="expr-list">
-                  {competitorExpressions.map((e, i) => (
-                    <div className="expr-row" key={i}>
-                      <div>
-                        <p className="en">{e.keyword}</p>
-                        <p className="eb" style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
-                          {e.brandName}
-                        </p>
-                      </div>
-                      <span className="ec">{e.count}회</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            <div className="dp-grid">
-              <div className="dp-card">
-                <p className="t">인지 답변의 대표 근거</p>
-                {evidence ? (
-                  <>
-                    <p className="q">
-                      &quot;{evidence.queryText}&quot;
-                      <br />
-                      <br />
-                      &quot;{evidence.sourceSentence}&quot;
-                    </p>
-                    <p className="s">
-                      {engineLabel(evidence.engine)} · {dateLabel(evidence.observedDate)}
-                    </p>
-                  </>
-                ) : (
-                  <p className="q">인지 질문 답변에서 확인된 근거가 아직 없어요.</p>
-                )}
-              </div>
-              <div className="dp-card">
-                <p className="t">추천 근거로 확인된 답변</p>
-                {reasonEvidence ? (
-                  <>
-                    <p className="q">&quot;{reasonEvidence.excerpt}&quot;</p>
-                    <p className="s">
-                      {engineLabel(reasonEvidence.engine)} · {dateLabel(reasonEvidence.executedAt)} · 추천 근거로
-                      판정
-                    </p>
-                  </>
-                ) : (
-                  <p className="q">아직 추천 답변에서 근거로 확인된 사례가 없어요.</p>
-                )}
-              </div>
-            </div>
-
-            {narrative.counterBoxCases.length > 0 && (
-              <details className="counter-box">
-                <summary className="counter-head">
-                  <span className="l">
-                    <span className="chev">▾</span>반대 증거와 제외된 사례
-                  </span>
-                  <span className="n">{narrative.counterBoxCases.length}건</span>
-                </summary>
-                <div className="counter-body">
-                  <ul>
-                    {narrative.counterBoxCases.map((c, i) => (
-                      <li key={i}>{c.explanation}</li>
-                    ))}
-                  </ul>
-                </div>
-              </details>
-            )}
-
-            {!stat.isLocationContext && (
-              <div className="dp-fact" style={{ marginTop: 16 }}>
-                <p className="t">현재 확인된 사실</p>
-                <p className="v">{buildFeatureConclusionSentence(stat)}</p>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
+  const oneLinerMain = oneLinerView.main;
+  const oneLinerText = oneLinerMain.state === '완료' ? oneLinerMain.oneLiner : null;
+  const oneLinerReviewedAt = oneLinerMain.state === '완료' ? oneLinerMain.reviewedAt : null;
 
   return (
     <>
       <div className="eyebrow-row">
-        <span className="eyebrow">인지와 위치의 간극</span>
-        <span className="approved-badge">✓ 자동 검수 완료</span>
+        <span className="eyebrow">인지와 추천, 그 사이</span>
       </div>
-      <h1 className="page-title">알고 있는 특징은 추천 답변까지 이어지고 있을까?</h1>
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '-4px 0 20px' }}>
-        AI가 아는 것 중 무엇이 실제{' '}
-        <strong style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>추천 근거</strong>로 쓰이는지
-        확인해요.
+      <h1 className="page-title">우리가 하는 말이 실제로 퍼지고 있을까?</h1>
+      <p className="subtitle">
+        AI가 우리 브랜드를 소개할 때 쓰는 표현이, 우리 브랜드를 추천하는 상황에도 함께 나타나는지 확인해 보아요.
       </p>
       <p className="meta-row">
         <span>
@@ -405,164 +234,182 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
         </span>
       </p>
 
-      {hero ? (
-        <div className="hero">
-          <p className="sub-label">가장 큰 간극</p>
-          <p className="fname">{hero.featureName}</p>
-
-          <div className="split">
-            <div className="split-box">
-              <p className="k">AI가 알고 있음</p>
-              <p className="v">
-                {hero.awarenessEngineCount}/{hero.awarenessEngineTotal}개 AI
-              </p>
-              <p className="d">인지 질문 답변에서 브랜드 특징으로 확인</p>
-            </div>
-            <div className="gap-connector">
-              <div className="line" />
-              <span className="tag">추천 근거로 아직 연결되지 않음</span>
-            </div>
-            <div className="split-box">
-              <p className="k">추천 답변에서 근거로 확인됨</p>
-              <p className="v">
-                {hero.placementReasonStatedCount}/{hero.placementTotalValidRuns}건
-              </p>
-              <p className="d">자리 질문 {placementQueries.length}개 답변 전체 유효 관측 중 근거로 확인된 건수</p>
-            </div>
-          </div>
-
-          <p className="sentence">{heroSentence}</p>
-
-          <div className="compare-box">
-            <p className="compare-head">이 특징, 다른 브랜드 답변에도 함께 등장한 횟수</p>
-            <p className="compare-sub">경쟁 브랜드는 이 자리에서 어떤 특징으로 함께 언급됐을까?</p>
-            <div className="compare-row">
-              <span className="who">
-                {brandName} <span className="tag-ours">(우리)</span>
-              </span>
-              <span className={`reason${hero.placementReasonStatedCount === 0 ? ' none' : ''}`}>
-                {hero.featureName} · {hero.placementReasonStatedCount}/{hero.placementTotalValidRuns}건
-              </span>
-            </div>
-            {heroCompetitors.slice(0, 3).map((c) => (
-              <div key={c.name}>
-                <div className="compare-divider" />
-                <div className="compare-row">
-                  <span className="who">{c.name}</span>
-                  <span className="reason">함께 언급 · {c.count}회</span>
-                </div>
-              </div>
-            ))}
-            <p className="compare-caption">
-              경쟁사 데이터는 아직 근거 연결 여부까지 판정되지 않았어요. 함께 언급된 횟수만 보여드려요.
-              {placementFeatureDataRuns < totalAppearedRuns && (
-                <>
-                  {' '}
-                  ⚠️ 표현 데이터는 {totalAppearedRuns}건 중 {placementFeatureDataRuns}건까지만 있어요 — 나머지는
-                  집계가 아직 안 된 날짜라, 여기 없는 표현이 있을 수 있어요.
-                </>
-              )}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="empty-state">
-          <p className="es-text">뚜렷한 간극이 아직 확인되지 않았어요.</p>
-          <p className="es-sub">인지된 특징이 자리 질문에서도 고르게 근거로 확인되고 있어요.</p>
-        </div>
-      )}
-
-      <section style={{ marginBottom: 0 }}>
-        <h2 className="sec">특징은 어디까지 이어졌을까?</h2>
-        <p className="sec-sub">중요한 간극부터 보여드려요. 항목을 누르면 아래 근거가 바뀌어요.</p>
-
-        <GapFeatureList defaultSelectedId={hero?.featureId ?? null}>
-          <div className="flist">
-            {sorted.map((stat) => (
-              <GapFeatureRow
-                key={stat.featureId}
-                featureId={stat.featureId}
-                featureName={stat.featureName}
-                fsub={`인지 ${stat.awarenessEngineCount}/${stat.awarenessEngineTotal} · 추천 근거 ${stat.placementReasonStatedCount}/${stat.placementTotalValidRuns}`}
-                pillClassName={stat.pill!}
-                pillLabel={GAP_PILL_LABEL[stat.pill!]}
-              />
-            ))}
-          </div>
-
-          <GapFeatureDetailPanel>
-            {sorted.map((stat) => (
-              <div key={stat.featureId} data-feature-id={stat.featureId}>
-                {renderFeatureDetail(stat)}
-              </div>
-            ))}
-          </GapFeatureDetailPanel>
-        </GapFeatureList>
-      </section>
-
-      {awarenessFeatureTop10.length > 0 && (
-        <section>
-          <h2 className="sec">소개 특징 TOP10</h2>
-          <p className="sec-sub">
-            인지 질문 답변에서 확인된 특징 후보 중, 질문·AI·날짜에 걸쳐 가장 넓게 반복 확인된 순서로 모았어요.
-            &quot;브랜드 한 줄&quot;에 실제로 반영됐는지와는 별개의 순위예요 — 반영 여부는 이 순위 뒤에 별도 검수를
-            거쳐 정해져요.
+      {/* 두 서사 나란히 */}
+      <div className="pair-connected">
+        <div className="narrative-card">
+          <p className="n-label">
+            AI가 우리를 <strong style={{ color: 'var(--text-primary)' }}>소개할 때</strong>
           </p>
+          {oneLinerText ? (
+            <>
+              <p className="n-sentence">&quot;{oneLinerText}&quot;</p>
+              {oneLinerReviewedAt ? (
+                <span className="reviewed-badge">✓ 사람 검토 완료 · {formatKstDate(oneLinerReviewedAt)}</span>
+              ) : (
+                <span className="pending-badge">검토 대기 중</span>
+              )}
+            </>
+          ) : (
+            <p className="n-sentence" style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}>
+              아직 브랜드 한 줄이 준비되지 않았어요.
+            </p>
+          )}
+        </div>
+
+        <div className="mid-connector">
+          <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-secondary)', border: 'none', background: 'var(--surface-0)', padding: '5px 10px' }}>
+            VS
+          </span>
+        </div>
+
+        <div className="narrative-card">
+          <p className="n-label">
+            AI가 우리를 <strong style={{ color: 'var(--text-primary)' }}>추천할 때</strong>
+          </p>
+          {heroQuery ? (
+            <>
+              <p style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
+                가장 강하게 등장한 자리 질문:
+              </p>
+              <p className="n-sentence" style={{ fontSize: 16 }}>
+                &quot;{heroQuery.queryText}&quot;
+              </p>
+              <span className="reviewed-badge" style={{ background: 'var(--bg-success)', color: 'var(--text-success)', marginTop: 8 }}>
+                등장률 {Math.round(heroQuery.visibilityRate * 100)}% · {heroQuery.totalRuns}회 중 {heroQuery.appearedRuns}회 등장
+              </span>
+            </>
+          ) : (
+            <p className="n-sentence" style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}>
+              아직 등장 데이터가 충분하지 않아요.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* 전제 설명 */}
+      <div className="narrative-card" style={{ marginBottom: 24 }}>
+        <p style={{ fontSize: 15, fontWeight: 500, lineHeight: 1.65, margin: '0 0 10px' }}>
+          AI들이 우리 브랜드를 소개할 때 나타나는 대표적인 특징과, 우리 브랜드를 추천할 때 등장하는 특징이
+          비슷할수록 브랜드 메시지가 잘 퍼지고 있다고 볼 수 있습니다.
+        </p>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+          *전제: 브랜드 한 줄이 실제 브랜드 메시지와 같다고 볼 때의 해석이에요.
+        </p>
+      </div>
+
+      {/* TOP10 비교 */}
+      <p className="section-title">특징 TOP10 비교 — 소개 vs 추천</p>
+      <p className="section-desc">
+        브랜드 한 줄 특징 후보 {candidates.length}개 전체 vs 자리질문 {placementQueries.length}개 답변 전체
+        {placementTop10 ? `(${placementTop10.appearedRuns}건)` : ''}에서 뽑은 표현.
+      </p>
+
+      <div className="narrative-pair" style={{ alignItems: 'stretch' }}>
+        <div className="narrative-card" style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border-strong)' }}>
+          <p className="n-label">소개 특징 TOP10</p>
           <div className="expr-list">
-            {awarenessFeatureTop10.map((f, i) => (
+            {awarenessTop10.map((f, i) => (
               <div className="expr-row" key={f.featureName}>
                 <p className="en">
                   {i + 1}. {f.featureName}
                 </p>
-                <span className="ec">
-                  질문 {f.questionCount}/{f.questionTotal} · AI {f.engineCount}/{f.engineTotal} · 날짜{' '}
-                  {f.dayCount}/{f.dayTotal}
+                <span className="ec" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
+                  {f.dayCount}/{f.dayTotal}일
                 </span>
               </div>
             ))}
           </div>
-        </section>
-      )}
+        </div>
 
-      {placementFeatureTop10.length > 0 && (
-        <section>
-          <h2 className="sec">자리 질문에서 반복된 표현 TOP10</h2>
-          <p className="sec-sub">
-            자리 질문 {placementQueries.length}개에서 우리 브랜드가 등장한 관측 {totalAppearedRuns}건 중, 브랜드를
-            설명할 때 반복된 표현을 빈도순으로 모았어요. 완전히 똑같은 글자로만 묶었어서, 뜻은 같은데 표현이 조금
-            다르면(예: &quot;협진&quot; · &quot;협진 시스템&quot;) 따로 잡힐 수 있어요.
-            {placementFeatureDataRuns < totalAppearedRuns && (
-              <>
-                {' '}
-                ⚠️ 표현 데이터는 {placementFeatureDataRuns}건까지만 집계돼 있어요 — 나머지{' '}
-                {totalAppearedRuns - placementFeatureDataRuns}건은 표현이 없어서가 아니라, 그 날짜 집계가 아직
-                안 돼 있어서예요.
-              </>
-            )}
+        <div className="narrative-card" style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border-strong)' }}>
+          <p className="n-label">추천 표현 TOP10</p>
+          {placementTop10 ? (
+            <div className="expr-list">
+              {placementTop10.items.map((f, i) => (
+                <div className="expr-row" key={f.keyword}>
+                  <p className="en">
+                    {i + 1}. {f.keyword}
+                  </p>
+                  <span className="ec" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
+                    {Math.round(f.rate * 100)}% · {f.count}건
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="es-text" style={{ fontSize: 13 }}>
+              아직 계산되지 않았어요 — 진단 완료 다음날 자동으로 채워져요.
+            </p>
+          )}
+        </div>
+      </div>
+      <p className="caption-note" style={{ marginBottom: 8 }}>
+        정확히 같은 문구가 아니어도 같은 개념이면 겹치는 걸로 볼 수 있어요(예: &quot;365일 연중무휴 진료&quot; ↔
+        &quot;화곡역 1분 거리에서 365일 진료&quot;) — 자동으로 짝지어주진 않아서 눈으로 비교해봐야 해요. 추천 쪽은
+        자리질문 답변 원문 전체를 다시 분석한 결과예요(집계 지연 영향 없음).
+      </p>
+      <p className="caption-note" style={{ marginBottom: 24 }}>
+        참고: 원문에 실제로 있는 표현인데 TOP10엔 안 잡히는 경우가 있어요 — 여러 브랜드를 한 문장에 나열하는
+        답변에서 특정 브랜드만 가리키는 게 아니거나, 한 문장에 여러 내용이 섞여 있을 때 대표 표현으로 다른 부분이
+        뽑히는 경우가 있어서예요. TOP10은 대표 표현 선정 방식의 한계가 있어 — 특정 문구의 정확한 빈도가 궁금하면
+        원문을 직접 대조하는 게 더 정확해요.
+      </p>
+
+      {/* AI는 어디서 정보를 가져올까 */}
+      <p className="section-title">AI는 어디서 정보를 가져올까</p>
+      <p className="section-desc">소개와 추천 특징이 서로 달라지는 이유.</p>
+
+      {ownedChannels.length === 0 ? (
+        <div
+          className="narrative-card"
+          style={{ marginBottom: 20, background: 'var(--surface-2)', border: '1px dashed var(--border-strong)', textAlign: 'center', padding: 28 }}
+        >
+          <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '0 0 6px' }}>
+            아직 소유 채널이 등록되지 않았어요.
           </p>
-          <div className="expr-list">
-            {placementFeatureTop10.map((f, i) => (
-              <div className="expr-row" key={f.keyword}>
-                <p className="en">
-                  {i + 1}. {f.keyword}
-                </p>
-                <span className="ec">
-                  {Math.round(f.rate * 100)}% · {f.appearedRuns}회 중 {f.count}회
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {heroSentence && (
-        <div className="tip-box">
-          <span className="tip-badge">TIP</span>
-          <p className="tip-title">AI도 근거를 대는 데는 이유가 있어요.</p>
-          <p className="tip-desc">{heroSentence}</p>
-          <GapTipsModal />
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            홈페이지 외 채널(인스타·블로그·유튜브 등)을 등록하면, AI가 브랜드를 소개·추천할 때 어디를 더 많이
+            참고하는지 볼 수 있어요.
+          </p>
+        </div>
+      ) : (
+        <div className="narrative-pair" style={{ marginBottom: 8, alignItems: 'stretch' }}>
+          <SourceAnalysisCard
+            title={`소개할 때 인용된 출처 (${awarenessUrls.length}건)`}
+            totalLabel="인지 질문 답변 전체"
+            analysis={awarenessSource}
+          />
+          <SourceAnalysisCard
+            title={`추천할 때 인용된 출처 (${placementUrls.length}건)`}
+            totalLabel="자리 질문 답변 전체"
+            analysis={placementSource}
+          />
         </div>
       )}
+
+      {/* 엔슬의 제안 */}
+      <p className="section-title">엔슬의 제안</p>
+      {narrativeLesson ? (
+        <div className="narrative-card">
+          <p style={{ fontSize: 16, fontWeight: 500, lineHeight: 1.6, margin: 0 }}>
+            {narrativeLesson.finalText ?? narrativeLesson.aiText}
+          </p>
+        </div>
+      ) : (
+        <p className="es-text" style={{ fontSize: 13 }}>
+          아직 제안이 준비되지 않았어요.
+        </p>
+      )}
+
+      <div className="tip-box">
+        <span className="tip-badge">TIP</span>
+        <p className="tip-title">같은 표현이 양쪽에 있다면, 눈여겨볼 신호예요.</p>
+        <p className="tip-desc">
+          AI는 브랜드가 스스로 하는 말(소유 채널)보다, 제3자가 쓴 말(외부 채널)을 더 많이 참고해서 추천 답변을
+          만듭니다. 소개할 때 쓰는 표현이 추천할 때도 함께 나타난다면, 그게 우리가 원래 하려던 말이었는지
+          확인해볼 만해요.
+        </p>
+      </div>
     </>
   );
 }

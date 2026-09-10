@@ -69,7 +69,7 @@ export type MentionFeatureRole = 'reason_stated' | 'co_mentioned';
  * snapshot 원문(rawResponse)에서 우리 브랜드 구간 텍스트를 재구성한다.
  * mentions 테이블엔 position이 저장 안 돼 있어서(attemptKeywordExtraction과
  * 같은 이유) 항상 재파싱이 필요하다 — 역할판정(runMentionFeatureRoleJudgment)과
- * 문구 생성(lib/gap-narratives.ts) 양쪽에서 재사용한다.
+ * "추천 표현 TOP10" 재분석(lib/placement-narrative.ts) 양쪽에서 재사용한다.
  */
 export function getBrandSegmentText(
   rawResponse: string,

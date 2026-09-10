@@ -539,13 +539,13 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .qdetail .lbl { font-size: 12px; color: var(--text-muted); margin: 0 0 4px; }
 .qdetail .cap { font-size: 11px; color: var(--text-muted); font-style: italic; margin: 0 0 10px; }
 
-/* ── 인지와 위치의 간극 화면 — Day22 ──
-   디자인 원본: docs/prototypes/ensl_gap_screen.html. 원본은 onclick으로
-   특징 목록 ↔ 상세 패널을 전환하지만(정적 HTML), 실제 화면은 서버
-   컴포넌트라 특징 하나당 <details>가 자기 상세 패널을 바로 아래에
-   펼치는 아코디언 구조로 바꿨다(brand-position.ts의 qlist와 같은 이유 —
-   클라이언트 JS 없이 접근성 기본 동작만으로 해결). .hero/.tip-box/.badge/
-   .chev는 이미 전역에 있어서 재사용, 이 화면 전용 클래스만 추가한다. */
+/* ── (구) 인지와 위치의 간극 화면 — Day22, 2026-09-10 화면 교체로 폐기 ──
+   아래 hero, pill, dp 계열, counter 계열, why-box, compare 계열, flist
+   계열 클래스는 그 옛 화면(hero/pill 뺄셈 구조) 전용이었다. 새 화면
+   ("인지와 추천, 그 사이", 아래 별도 구간 참고)은 이 구조를 안 쓰지만,
+   다른 화면(브랜드 인지의 AI 일치도 섹션 등)이 dp-eyebrow 같은 일부
+   클래스를 계속 써서 이 블록 전체를 지우지는 않았다 — 완전히 안 쓰는 게
+   확인되면 정리할 것. */
 .eyebrow-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .approved-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-success); background: var(--bg-success); padding: 2px 9px; border-radius: 20px; }
 
@@ -637,3 +637,32 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .counter-body li { margin-bottom: 8px; }
 .counter-body li:last-child { margin-bottom: 0; }
 .ci-conflict-vs { text-align: center; font-size: 10px; color: var(--text-warning); margin: 2px 0; }
+
+/* ── "인지와 추천, 그 사이" 화면 (Day23, 2026-09-10) ── */
+
+.subtitle { font-size: 13px; color: var(--text-secondary); margin: -4px 0 20px; }
+
+.narrative-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.narrative-card { background: var(--surface-1); border-radius: 12px; padding: 22px; }
+.narrative-card .n-label { font-size: 12px; color: var(--text-muted); margin: 0 0 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.narrative-card .n-sentence { font-size: 18px; font-weight: 500; line-height: 1.55; margin: 0 0 16px; }
+
+.reviewed-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-success); background: var(--bg-success); padding: 2px 9px; border-radius: 20px; }
+.pending-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); background: var(--surface-2); border: 0.5px solid var(--border-strong); padding: 2px 9px; border-radius: 20px; }
+
+.section-title { font-size: 17px; font-weight: 500; margin: 40px 0 4px; }
+.section-desc { font-size: 13px; color: var(--text-secondary); margin: 0 0 16px; }
+
+.caption-note { font-size: 11px; color: var(--text-muted); margin-top: 10px; line-height: 1.6; }
+
+/* 카드 사이 커넥터(좌우 배치) — 서사 화면의 "두 카드 + VS" 등에 쓴다 */
+.pair-connected { display: grid; grid-template-columns: 1fr 130px 1fr; align-items: stretch; margin-bottom: 24px; }
+.mid-connector { position: relative; display: flex; align-items: center; justify-content: center; }
+.mid-connector::before { content: ''; position: absolute; top: 50%; left: 6px; right: 6px; border-top: 1px dashed var(--border-strong); }
+.mid-connector span { position: relative; background: var(--surface-0); padding: 5px 12px; font-size: 12px; font-weight: 500; border-radius: 20px; border: 0.5px solid var(--border-strong); text-align: center; line-height: 1.4; }
+
+@media (max-width: 700px) {
+  .narrative-pair, .pair-connected { grid-template-columns: 1fr !important; }
+  .mid-connector { margin: 8px 0; }
+  .mid-connector::before { top: 0; bottom: 0; left: 50%; right: auto; border-top: none; border-left: 1px dashed var(--border-strong); height: 100%; width: 0; }
+}

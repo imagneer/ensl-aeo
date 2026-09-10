@@ -12,7 +12,7 @@ interface BrandOption {
 const NAV_ITEMS = [
   { href: '/brand-awareness', label: '브랜드 인지', icon: 'ti-message-2' },
   { href: '/brand-position', label: '브랜드 현 위치', icon: 'ti-target-arrow' },
-  { href: '/gap', label: '인지와 위치의 간극', icon: 'ti-git-compare' },
+  { href: '/gap', label: '인지와 추천, 그 사이', icon: 'ti-git-compare' },
   { href: '/trend', label: '변화 추이', icon: 'ti-trending-up' },
 ] as const;
 
