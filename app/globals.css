@@ -617,6 +617,8 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .expr-row:last-child { border-bottom: none; }
 .expr-row .en { font-size: 13px; font-weight: 500; margin: 0 0 2px; }
 .expr-row .ec { font-size: 15px; font-weight: 500; }
+.expr-row-matched { background: var(--bg-success); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 6px; border-bottom-color: transparent; }
+.expr-row-matched .en { font-weight: 700; }
 
 .dp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
 .dp-card { background: var(--surface-1); border-radius: var(--radius); padding: 14px; }

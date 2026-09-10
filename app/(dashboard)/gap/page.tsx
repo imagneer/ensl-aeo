@@ -16,7 +16,7 @@ import {
 } from '@/lib/supabase';
 import { kstDayBoundsUtc, todayKST } from '@/lib/aggregator';
 import { fetchGapFeatureUniverse } from '@/lib/mention-feature-roles';
-import { buildAwarenessFeatureTop10 } from '@/lib/gap';
+import { buildAwarenessFeatureTop10, markTop10Overlap } from '@/lib/gap';
 import { buildQueryPositionStats, selectHeroQuery } from '@/lib/brand-position';
 import { buildSourceAnalysis, type SourceAnalysisResult } from '@/lib/source-analysis';
 
@@ -195,6 +195,10 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
   const heroQuery = selectHeroQuery(positionStats);
 
   const awarenessTop10 = buildAwarenessFeatureTop10(candidates);
+  const overlap = markTop10Overlap(
+    awarenessTop10.map((f) => f.featureName),
+    placementTop10?.items.map((f) => f.keyword) ?? []
+  );
 
   const ownedPatterns = ownedChannels.map((c) => c.pattern);
   const awarenessSource = buildSourceAnalysis(awarenessUrls, ownedPatterns);
@@ -309,7 +313,7 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
           <p className="n-label">소개 특징 TOP10</p>
           <div className="expr-list">
             {awarenessTop10.map((f, i) => (
-              <div className="expr-row" key={f.featureName}>
+              <div className={`expr-row${overlap.awarenessMatched[i] ? ' expr-row-matched' : ''}`} key={f.featureName}>
                 <p className="en">
                   {i + 1}. {f.featureName}
                 </p>
@@ -326,7 +330,7 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
           {placementTop10 ? (
             <div className="expr-list">
               {placementTop10.items.map((f, i) => (
-                <div className="expr-row" key={f.keyword}>
+                <div className={`expr-row${overlap.placementMatched[i] ? ' expr-row-matched' : ''}`} key={f.keyword}>
                   <p className="en">
                     {i + 1}. {f.keyword}
                   </p>
@@ -344,9 +348,10 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
         </div>
       </div>
       <p className="caption-note" style={{ marginBottom: 8 }}>
-        정확히 같은 문구가 아니어도 같은 개념이면 겹치는 걸로 볼 수 있어요(예: &quot;365일 연중무휴 진료&quot; ↔
-        &quot;화곡역 1분 거리에서 365일 진료&quot;) — 자동으로 짝지어주진 않아서 눈으로 비교해봐야 해요. 추천 쪽은
-        자리질문 답변 원문 전체를 다시 분석한 결과예요(집계 지연 영향 없음).
+        초록 배경 = 핵심 단어가 겹치는 표현이에요(예: &quot;365일 연중무휴 진료&quot; ↔ &quot;화곡역 1분 거리에서
+        365일 진료&quot; — &quot;365일&quot;이 공통). 정확히 같은 문구를 찾는 게 아니라 낱말 겹침만 보기 때문에,
+        &quot;협진&quot;·&quot;임플란트&quot;처럼 흔한 단어가 우연히 겹쳐도 강조될 수 있어요 — 눈으로 한 번 더
+        확인해보는 게 안전해요. 추천 쪽은 자리질문 답변 원문 전체를 다시 분석한 결과예요(집계 지연 영향 없음).
       </p>
       <p className="caption-note" style={{ marginBottom: 24 }}>
         참고: 원문에 실제로 있는 표현인데 TOP10엔 안 잡히는 경우가 있어요 — 여러 브랜드를 한 문장에 나열하는

@@ -56,3 +56,52 @@ export function buildAwarenessFeatureTop10(
       dayTotal: c.dayTotal,
     }));
 }
+
+/**
+ * "이 단어가 있으면 사실상 아무 표현하고나 다 묶인다"는 흔한 운영 표현
+ * — 매칭 신호로 못 쓴다(전부 초록불이 켜지면 강조가 의미 없어진다).
+ * 임플란트·협진처럼 이 브랜드/업종에서 여전히 구별력 있는 단어는 남긴다
+ * (2026-09-10 실측: 소개 TOP10 10개 중 7개가 이 목록으로 걸러낸 뒤에도
+ * 적어도 하나씩 매칭돼서 과소 매칭도 아니었다).
+ */
+const OVERLAP_STOPWORDS = new Set([
+  '진료', '치료', '치과', '시술', '시스템', '제공', '관리', '가능', '서비스', '병원', '환자', '등', '및', '일반적',
+]);
+
+/** 괄호·중점·슬래시·쉼표로 뭉쳐 쓴 표현을 낱말 단위로 쪼갠다. */
+function extractOverlapTokens(phrase: string): string[] {
+  return phrase
+    .replace(/[()·/,"'「」]/g, ' ')
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !OVERLAP_STOPWORDS.has(t));
+}
+
+/**
+ * 소개 TOP10과 추천 TOP10 사이 "핵심 단어 겹침" 자동 강조(2026-09-10
+ * 작업지시 — LLM 판정 아니고 키워드 매칭). 완전히 같은 문구가 아니어도
+ * 겹치는 걸로 본다: 한쪽 표현을 낱말로 쪼갠 뒤, 그 낱말이 다른 쪽 표현
+ * 문자열에 부분 포함되면 매칭(예: "365일 연중무휴 진료" ↔ "화곡역 1분
+ * 거리에서 365일 진료" — "365일" 토큰이 공통).
+ *
+ * ⚠️ 정밀 매칭이 아니다 — 조사·어미 변형까지 다 처리하는 형태소 분석이
+ * 아니라 공백/구두점 기준 낱말 분리 + 부분 문자열 포함이다. "협진"·
+ * "임플란트"처럼 흔히 쓰는 단어가 우연히 겹쳐도 매칭으로 잡힌다 — 그래서
+ * "정확히 같은 문구가 아닐 수 있다"는 캡션을 화면에 계속 유지한다.
+ */
+export function markTop10Overlap(
+  awarenessFeatureNames: string[],
+  placementKeywords: string[]
+): { awarenessMatched: boolean[]; placementMatched: boolean[] } {
+  const awarenessTokens = awarenessFeatureNames.map(extractOverlapTokens);
+  const placementTokens = placementKeywords.map(extractOverlapTokens);
+
+  const awarenessMatched = awarenessFeatureNames.map((_, i) =>
+    placementKeywords.some((p) => awarenessTokens[i].some((t) => p.includes(t)))
+  );
+  const placementMatched = placementKeywords.map((_, j) =>
+    awarenessFeatureNames.some((a) => placementTokens[j].some((t) => a.includes(t)))
+  );
+
+  return { awarenessMatched, placementMatched };
+}
