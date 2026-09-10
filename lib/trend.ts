@@ -251,6 +251,20 @@ export interface PlacementQueryTransition {
   ownTrend: TrendDirectionResult; // confidence(확인된 추세/관찰 중)는 이 값을 그대로 화면에 노출해야 함
   periodARate: number | null; // 초반 구간 평균 노출률 (sum mentionCount / sum totalRuns)
   periodBRate: number | null; // 후반 구간 평균 노출률
+  /**
+   * periodARate 또는 periodBRate 중 하나라도 null(그 구간에 daily 집계 행이
+   * 통째로 없음 — totalRuns 합이 0)이면 true.
+   *
+   * ⚠️ (2026-09-10 실측 검수 중 발견한 버그) 처음엔 이 null을 `?? 0`으로
+   * "0%"와 똑같이 취급했다. 그랬더니 실제 자리 질문 하나(9/1~9/7 진단인데
+   * 9/5~9/7 daily 행이 아예 없던 질문)가 "70%대 → 0%로 폭락"으로 계산돼
+   * |delta|가 제일 커져서 TOP4 1위로 잘못 뽑혔다 — 실제로는 "그 구간을
+   * 못 쟀다"일 뿐인데 "완전히 사라졌다"로 둔갑한 것. CLAUDE.md 절대
+   * 원칙 4번("판정 불가를 미노출로 세면 안 된다")을 코드에서 그대로
+   * 어긴 사례라 발견 즉시 고쳤다 — selectFeaturedPlacementQueries가 이
+   * 플래그를 보고 delta 순위 계산에서 제외한다.
+   */
+  dataIncomplete: boolean;
   /** transitionType==='comp'일 때만 채워짐 — 같은 구간에서 부상한 경쟁 브랜드 */
   risingCompetitor: { brandId: string; name: string; trend: TrendDirectionResult } | null;
 }
@@ -290,6 +304,14 @@ function averageRate(points: { totalRuns: number; mentionCount: number }[]): num
  *    안 매기면 화면에 아무것도 못 보여준다. 대신 ownTrend.confidence를
  *    반드시 같이 노출해서 "확인된 추세"와 "관찰 중인 신호"를 구분해야
  *    한다(작업지시서 §3) — 이건 화면 구현 단계에서 놓치면 안 되는 지점.
+ *
+ *    단, periodARate·periodBRate 중 하나라도 null(판정 불가)이면 이
+ *    평균 기반 fallback 자체를 안 쓴다 — null을 0으로 셈해서 방향을
+ *    지어내면 "못 쟀다"가 "정말 그 방향으로 움직였다"로 둔갑한다
+ *    (dataIncomplete 필드 설명 참고). 이 경우 ownTrend.direction을
+ *    그대로 쓰고(대개 'unknown'), 'down'이 아니므로 기본값인 'rise'로
+ *    분류되지만 dataIncomplete=true가 같이 나가니 화면에서 "판정 불가"
+ *    임을 반드시 구분해서 보여줘야 한다.
  */
 export function classifyPlacementTransition(
   queryId: string,
@@ -300,14 +322,23 @@ export function classifyPlacementTransition(
 ): PlacementQueryTransition {
   const periodARate = averageRate(periodAPoints);
   const periodBRate = averageRate(periodBPoints);
-  const periodAMentionTotal = periodAPoints.reduce((sum, p) => sum + p.mentionCount, 0);
+  const dataIncomplete = periodARate === null || periodBRate === null;
 
   const ownTrend = classifyDailyTrend(fullSeries);
-  const fallbackDirection: TrendDirection = (periodBRate ?? 0) - (periodARate ?? 0) >= 0 ? 'up' : 'down';
-  const effectiveDirection = ownTrend.direction === 'unknown' ? fallbackDirection : ownTrend.direction;
+  const fallbackDirection: TrendDirection | null = dataIncomplete
+    ? null
+    : periodBRate! - periodARate! >= 0
+      ? 'up'
+      : 'down';
+  const effectiveDirection =
+    ownTrend.direction === 'unknown' ? (fallbackDirection ?? 'unknown') : ownTrend.direction;
 
-  if (periodAMentionTotal === 0 && (periodBRate ?? 0) > 0) {
-    return { queryId, transitionType: 'start', ownTrend, periodARate, periodBRate, risingCompetitor: null };
+  // 'start' 판정은 periodARate가 정확히 0(=그 구간에 관측은 있었는데 한
+  // 번도 안 나타남)일 때만 쓴다 — periodAPoints 자체가 비어서 periodARate가
+  // null인 경우(=관측 자체가 없어서 "0번 나타남"인지조차 모름)까지 start로
+  // 몰면, "못 쟀다"를 "확실히 없었다"로 둔갑시키는 같은 종류의 오류가 된다.
+  if (periodARate === 0 && periodBRate !== null && periodBRate > 0) {
+    return { queryId, transitionType: 'start', ownTrend, periodARate, periodBRate, dataIncomplete, risingCompetitor: null };
   }
 
   if (effectiveDirection === 'down') {
@@ -320,14 +351,15 @@ export function classifyPlacementTransition(
           ownTrend,
           periodARate,
           periodBRate,
+          dataIncomplete,
           risingCompetitor: { brandId: competitor.brandId, name: competitor.name, trend: competitorTrend },
         };
       }
     }
-    return { queryId, transitionType: 'fall', ownTrend, periodARate, periodBRate, risingCompetitor: null };
+    return { queryId, transitionType: 'fall', ownTrend, periodARate, periodBRate, dataIncomplete, risingCompetitor: null };
   }
 
-  return { queryId, transitionType: 'rise', ownTrend, periodARate, periodBRate, risingCompetitor: null };
+  return { queryId, transitionType: 'rise', ownTrend, periodARate, periodBRate, dataIncomplete, risingCompetitor: null };
 }
 
 /**
@@ -339,14 +371,23 @@ export function classifyPlacementTransition(
  * 채운다 — 화면에는 각 항목의 ownTrend.confidence를 그대로 노출해서
  * "확인된 변화"와 "관찰 중인 신호"를 섞어서 보여주면 안 된다
  * (2026-09-10 루아 확인).
+ *
+ * ⚠️ dataIncomplete=true인 항목(초반 또는 후반 구간에 daily 행이 통째로
+ * 없어서 delta를 계산할 근거가 없는 질문)은 confirmed·watching 순위
+ * 밖으로 완전히 빼서 맨 뒤에 둔다 — delta로 줄 세우면 "못 쟀다"가 가장
+ * 큰 변화처럼 보이는 사고가 난다(위 dataIncomplete 필드 설명의 실측
+ * 버그 참고). topN을 다른 항목으로 못 채울 때만 순서대로 채워 넣는다.
  */
 export function selectFeaturedPlacementQueries(
   transitions: PlacementQueryTransition[],
   topN = 4
 ): PlacementQueryTransition[] {
-  const withDelta = transitions.map((t) => ({
+  const comparable = transitions.filter((t) => !t.dataIncomplete);
+  const incomplete = transitions.filter((t) => t.dataIncomplete);
+
+  const withDelta = comparable.map((t) => ({
     transition: t,
-    absDelta: Math.abs((t.periodBRate ?? 0) - (t.periodARate ?? 0)),
+    absDelta: Math.abs(t.periodBRate! - t.periodARate!),
   }));
 
   const confirmed = withDelta
@@ -357,5 +398,7 @@ export function selectFeaturedPlacementQueries(
     .filter((x) => x.transition.ownTrend.confidence !== 'confirmed')
     .sort((a, b) => b.absDelta - a.absDelta);
 
-  return [...confirmed, ...watching].slice(0, topN).map((x) => x.transition);
+  const ranked = [...confirmed, ...watching].map((x) => x.transition);
+
+  return [...ranked, ...incomplete].slice(0, topN);
 }
