@@ -631,6 +631,62 @@ export async function fetchRecentDailyMetrics(params: {
     mentionCount: row.mention_count,
   }));
 }
+
+// ── day-by-day 지표 범위 조회 (Day23 — 변화 추이 화면용) ──
+
+export interface DailyQueryMetric {
+  periodStart: string; // ISO, UTC. KST 자정 기준 하루 시작
+  totalRuns: number;
+  mentionCount: number;
+  visibilityRate: number | null; // totalRuns=0이면 null (aggregator.ts 규칙 그대로 — "0"이 아니라 "판정 불가")
+}
+
+/**
+ * 특정 (질문, 브랜드, 엔진) 조합의 daily 집계를, 기간(periodStart 이상
+ * ~ periodEnd 미만, UTC ISO)으로 잘라서 가져온다.
+ *
+ * fetchRecentDailyMetrics(위, Day13 알림 판정용)와 다른 점: 그쪽은 "최근 N개
+ * 행"(limit 기준, 기간 없음)만 가져오고 visibility_rate는 안 돌려준다 —
+ * 알림 판정엔 mentionCount=0 여부만 있으면 되기 때문. 변화 추이 화면은
+ * 정해진 비교 구간(진단 내 3일 vs 3일, 또는 진단 대 진단)의 값을 그래프로
+ * 그려야 해서 범위 조회 + visibility_rate가 둘 다 필요해 별도로 뺐다.
+ *
+ * ⚠️ anon이 아니라 supabaseAdmin을 쓴다 — fetchAggregatedMetrics(위)와 같은
+ *    이유: aggregated_metrics에 anon 읽기 권한이 있는지 아직 확인 안 됐다
+ *    (2026-08-19 기준). 확인 전까지는 admin 전용으로 통일한다.
+ */
+export async function fetchDailyMetricsForRange(params: {
+  queryId: string;
+  brandId: string;
+  engine: string;
+  periodStart: string;
+  periodEnd: string;
+}): Promise<DailyQueryMetric[]> {
+  const { data, error } = await supabaseAdmin
+    .from('aggregated_metrics')
+    .select('period_start, total_runs, mention_count, visibility_rate')
+    .eq('query_id', params.queryId)
+    .eq('brand_id', params.brandId)
+    .eq('engine', params.engine)
+    .eq('aggregation_level', 'daily')
+    .gte('period_start', params.periodStart)
+    .lt('period_start', params.periodEnd)
+    .order('period_start', { ascending: true });
+
+  if (error) {
+    console.error('day-by-day 집계 범위 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    periodStart: row.period_start,
+    totalRuns: row.total_runs,
+    mentionCount: row.mention_count,
+    visibilityRate: row.visibility_rate,
+  }));
+}
+
 export interface ConsecutiveMissResult {
   consecutiveDays: number;
   periods: RecentDailyMetric[]; // 실제로 연속 미노출로 카운트된 날짜들 (최신순)
