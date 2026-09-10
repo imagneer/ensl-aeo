@@ -71,6 +71,13 @@ export function buildSourceAnalysis(
     else if (classification === 'third_party') thirdPartyCount++;
     else unresolvableCount++;
 
+    // ⚠️ (2026-09-10 버그 수정) 판정불가(vertexaisearch.cloud.google.com 등
+    // 엔진 중계주소)는 실제 도메인이 아니라 그 자체를 숨기는 리다이렉트라,
+    // "출처 상위" 목록에 들어가면 안 된다 — 여기서 세면 순위 계산에서만
+    // 빠지고 없던 일이 되는 게 아니라, 애초에 "어느 도메인인지 모른다"는
+    // 뜻이라 도메인 집계 자체에서 제외해야 한다.
+    if (classification === 'unresolvable') continue;
+
     const domain = extractHostname(url);
     if (domain) countByDomain.set(domain, (countByDomain.get(domain) ?? 0) + 1);
   }
