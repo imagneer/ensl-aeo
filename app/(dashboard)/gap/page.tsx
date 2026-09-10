@@ -50,7 +50,8 @@ function SourceAnalysisCard({
         <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>외부 {100 - ownedPct}%</span>
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>
-        {totalLabel} · 판정 가능 {analysis.resolvableCount}건 기준(판정불가 {analysis.unresolvableCount}건 제외)
+        {totalLabel}에 달린 인용 전체 기준(우리 브랜드 언급 부분만이 아니라 같이 등장한 다른 치과 인용도 포함) ·
+        판정 가능 {analysis.resolvableCount}건(판정불가 {analysis.unresolvableCount}건 제외)
       </p>
       <p className="dp-eyebrow" style={{ marginBottom: 8 }}>
         출처 상위
