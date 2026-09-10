@@ -21,6 +21,7 @@ import {
   sumPlacementTotalValidRuns,
   sumPlacementAppearedRuns,
   buildPlacementFeatureFrequencyTop10,
+  buildAwarenessFeatureTop10,
   selectGapHero,
   sortForFeatureList,
   visibleGapFeatures,
@@ -171,6 +172,7 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
   const totalValidRuns = sumPlacementTotalValidRuns([...recordsByQuery.values()]);
   const totalAppearedRuns = sumPlacementAppearedRuns([...recordsByQuery.values()]);
   const placementFeatureTop10 = buildPlacementFeatureFrequencyTop10(aggregatedRows, totalAppearedRuns);
+  const awarenessFeatureTop10 = buildAwarenessFeatureTop10(candidates);
   // ⚠️ (2026-09-09 확인) aggregated_metrics 집계가 실시간 데이터보다 밀려 있어서,
   // "우리 브랜드 등장"(totalAppearedRuns)만큼 표현 데이터가 다 있지는 않다 —
   // 화면에 이 차이를 숨기지 않기 위해 별도로 세서 캡션에 보여준다.
@@ -497,6 +499,30 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
           </GapFeatureDetailPanel>
         </GapFeatureList>
       </section>
+
+      {awarenessFeatureTop10.length > 0 && (
+        <section>
+          <h2 className="sec">소개 특징 TOP10</h2>
+          <p className="sec-sub">
+            인지 질문 답변에서 확인된 특징 후보 중, 질문·AI·날짜에 걸쳐 가장 넓게 반복 확인된 순서로 모았어요.
+            &quot;브랜드 한 줄&quot;에 실제로 반영됐는지와는 별개의 순위예요 — 반영 여부는 이 순위 뒤에 별도 검수를
+            거쳐 정해져요.
+          </p>
+          <div className="expr-list">
+            {awarenessFeatureTop10.map((f, i) => (
+              <div className="expr-row" key={f.featureName}>
+                <p className="en">
+                  {i + 1}. {f.featureName}
+                </p>
+                <span className="ec">
+                  질문 {f.questionCount}/{f.questionTotal} · AI {f.engineCount}/{f.engineTotal} · 날짜{' '}
+                  {f.dayCount}/{f.dayTotal}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {placementFeatureTop10.length > 0 && (
         <section>

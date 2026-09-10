@@ -1495,6 +1495,11 @@ export interface StoredBrandFeatureCandidate {
   dayTotal: number;
   passedMinCriteria: boolean;
   tier: FeatureTier | null;
+  /** 질문·AI·날짜 커버리지 비율의 평균(brand-one-liner.ts evaluateGroups의
+   *  strength) — "소개 특징 TOP10"(간극 화면, 2026-09-10) 정렬 기준으로
+   *  재사용한다. ⚠️ 점수 자체는 화면에 원 숫자로 보여주지 않는다(계산법을
+   *  설명하기 어려운 숫자는 미게시 원칙) — 순위 매기는 용도로만 쓴다. */
+  intensityScore: number;
   evidenceExpressionIds: string[];
 }
 
@@ -1506,7 +1511,7 @@ export async function fetchBrandFeatureCandidatesForDiagnosis(
   const { data, error } = await client
     .from('brand_feature_candidates')
     .select(
-      'id, diagnosis_id, brand_id, feature_name, category, question_count, question_total, engine_count, engine_total, day_count, day_total, passed_min_criteria, tier, evidence_expression_ids'
+      'id, diagnosis_id, brand_id, feature_name, category, question_count, question_total, engine_count, engine_total, day_count, day_total, passed_min_criteria, tier, intensity_score, evidence_expression_ids'
     )
     .eq('diagnosis_id', diagnosisId)
     // 2026-09-04, 재시도 중복 방어(아래 deleteBrandOneLinerArtifacts로
@@ -1534,6 +1539,7 @@ export async function fetchBrandFeatureCandidatesForDiagnosis(
     dayTotal: row.day_total,
     passedMinCriteria: row.passed_min_criteria,
     tier: row.tier,
+    intensityScore: row.intensity_score,
     evidenceExpressionIds: row.evidence_expression_ids,
   }));
 }

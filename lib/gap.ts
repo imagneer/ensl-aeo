@@ -142,6 +142,46 @@ export function buildPlacementFeatureFrequencyTop10(
     .slice(0, topN);
 }
 
+export interface AwarenessFeatureFrequency {
+  featureName: string;
+  questionCount: number;
+  questionTotal: number;
+  engineCount: number;
+  engineTotal: number;
+  dayCount: number;
+  dayTotal: number;
+}
+
+/**
+ * "소개 특징 TOP10"(간극 화면, 2026-09-10 — 자리질문 쪽 "추천 특징 TOP10"과
+ * 대칭으로 요청됨) — brand_feature_candidates를 intensityScore(질문·AI·
+ * 날짜 커버리지 비율의 평균, brand-one-liner.ts evaluateGroups 참고) 내림차순
+ * 정렬해서 상위 N개만 낸다.
+ *
+ * ⚠️ intensityScore 1등이 실제 "브랜드 한 줄"에 반영된다는 보장은 없다
+ * (2026-09-09 확인 — 최종 반영 여부는 이 점수 뒤에 붙는 별도 LLM 자동검수
+ * 단계에서 갈릴 수 있다). 이 목록은 "반영 여부"가 아니라 "커버리지가 가장
+ * 넓은 특징이 뭔가"를 보여주는 순수 순위표라 반영 배지를 붙이지 않는다
+ * (2026-09-10 루아 확인).
+ */
+export function buildAwarenessFeatureTop10(
+  candidates: StoredBrandFeatureCandidate[],
+  topN = 10
+): AwarenessFeatureFrequency[] {
+  return [...candidates]
+    .sort((a, b) => b.intensityScore - a.intensityScore)
+    .slice(0, topN)
+    .map((c) => ({
+      featureName: c.featureName,
+      questionCount: c.questionCount,
+      questionTotal: c.questionTotal,
+      engineCount: c.engineCount,
+      engineTotal: c.engineTotal,
+      dayCount: c.dayCount,
+      dayTotal: c.dayTotal,
+    }));
+}
+
 export type GapPill = 'gap' | 'works' | 'new' | 'condition' | null;
 
 export const GAP_PILL_LABEL: Record<Exclude<GapPill, null>, string> = {
