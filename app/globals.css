@@ -168,6 +168,15 @@
   --mark-comp: #E8E5DA;
   --radius: 8px;
 
+  /* 변화 추이 화면(Day23) 그래프 선 색 — docs/prototypes/ensl_trend_screen.html 그대로 */
+  --line-1: #27500A;
+  --line-2: #8A8880;
+  --line-3: #B8783B;
+  --line-q1: #27500A;
+  --line-q2: #5F5E5A;
+  --line-q3: #B8783B;
+  --line-q4: #A9A497;
+
   color: var(--text-primary);
   background: var(--surface-0);
 }
@@ -488,6 +497,7 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
 .badge.sometimes { background: var(--border); border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
 .badge.none { border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
 .badge.insufficient { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); }
+.badge.unavailable { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); font-size: 11px; padding: 3px 10px; }
 
 .hero { background: var(--surface-1); border-radius: 12px; padding: 2rem; margin-bottom: 32px; }
 .hero .sub-label { font-size: 13px; color: var(--text-secondary); margin: 0 0 10px; }
@@ -668,3 +678,79 @@ h2.section-title { font-size: 18px; font-weight: 500; color: var(--text-primary)
   .mid-connector { margin: 8px 0; }
   .mid-connector::before { top: 0; bottom: 0; left: 50%; right: auto; border-top: none; border-left: 1px dashed var(--border-strong); height: 100%; width: 0; }
 }
+
+/* ── 변화 추이 화면 (Day23, 2026-09-14) ──
+   docs/prototypes/ensl_trend_screen.html에서 그대로 포팅. 기존 클래스와
+   이름이 겹치지 않게 확인하고 넣었다(예: .pill은 이미 있어서 변형만 추가,
+   .dp-grid/.dp-card/.dp-fact도 이미 있어서 재사용하고 새로 안 만듦). */
+
+.basis-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); margin: 0 0 28px; }
+.basis-line b { color: var(--text-secondary); font-weight: 500; }
+.basis-line i { color: var(--text-success); font-size: 13px; }
+.basis-line .sep { color: var(--border-strong); }
+
+.chart-card { background: var(--surface-2); border: 0.5px solid var(--border); border-radius: 12px; padding: 20px 22px 16px; }
+.chart-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.leg-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+.leg-item.off { opacity: 0.35; }
+.leg-swatch { width: 14px; height: 3px; border-radius: 2px; }
+.chart-svg-wrap { overflow-x: auto; }
+.chart-svg-wrap svg { display: block; }
+.gridline { stroke: var(--border); stroke-width: 1; }
+.axis-label { font-size: 10px; fill: var(--text-muted); font-family: var(--font-sans); }
+.day-label { font-size: 10.5px; fill: var(--text-secondary); font-family: var(--font-sans); }
+.chart-line { fill: none; stroke-width: 2.4; }
+.chart-point { cursor: pointer; stroke: var(--surface-2); stroke-width: 2; }
+.chart-read { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 14px 0 0; padding-top: 14px; border-top: 0.5px solid var(--border); }
+
+.graph-evidence { border: 0.5px solid var(--border-strong); border-radius: 12px; padding: 18px 20px; margin-top: 14px; }
+.graph-hint { font-size: 12px; color: var(--text-muted); margin: 14px 0 0; display: flex; align-items: center; gap: 5px; }
+.ge-top { margin-bottom: 12px; }
+.ge-eyebrow { font-size: 11px; color: var(--text-muted); margin: 0 0 3px; }
+.ge-day { font-size: 15px; font-weight: 500; margin: 0; }
+.ge-quote-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 4px; }
+.ge-quote-grid.two { grid-template-columns: 1fr 1fr; }
+.ge-card { background: var(--surface-1); border-radius: var(--radius); padding: 13px 15px; }
+.ge-card .t { font-size: 11px; color: var(--text-muted); margin: 0 0 7px; }
+.ge-card .q { font-size: 13px; line-height: 1.6; margin: 0 0 7px; }
+.ge-card .s { font-size: 11px; color: var(--text-muted); margin: 0; }
+.ge-note { background: var(--bg-warning); border-left: 2px solid var(--text-warning); border-radius: 0 var(--radius) var(--radius) 0; padding: 10px 14px; margin-top: 12px; font-size: 12px; color: var(--text-warning); line-height: 1.6; }
+.ge-note.ok { background: var(--bg-success); border-left-color: var(--text-success); color: var(--text-success); }
+
+/* 자리 질문 전환 유형 pill — lib/trend.ts PlacementTransitionType과 이름을 맞췄다.
+   기존 .pill.works/.gap/.new(구 간극 화면 전용)와는 별개 변형. */
+.pill.rise { background: var(--bg-success); color: var(--text-success); }
+.pill.start { border: 0.5px solid var(--border-strong); color: var(--text-secondary); }
+.pill.fall { background: var(--bg-warning); color: var(--text-warning); }
+.pill.comp { background: var(--surface-1); border: 0.5px solid var(--border-strong); color: var(--text-muted); }
+
+.dp-track { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.dp-track .tbox { flex: 1; background: var(--surface-1); border-radius: var(--radius); padding: 14px; }
+.dp-track .tbox .k { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+.dp-track .tbox .v { font-size: 20px; font-weight: 500; margin: 0; }
+.dp-track .tarrow { color: var(--text-muted); font-size: 18px; }
+
+/* 아코디언 — <details>/<summary> 네이티브 구조에 스타일만 입힌다
+   (2026-09-08 결정: 다중 펼침 유지가 필요한 다른 화면들과 같은 패턴,
+   .frow-head/.counter-head가 이미 이렇게 쓰고 있음). */
+.acc-section { border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; margin-top: 18px; }
+.acc-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 20px; cursor: pointer; background: var(--surface-2); gap: 12px; list-style: none; }
+.acc-head::-webkit-details-marker { display: none; }
+.acc-head:hover { background: var(--surface-1); }
+.acc-head .at { font-size: 14px; font-weight: 500; margin: 0 0 2px; }
+.acc-head .as { font-size: 12px; color: var(--text-muted); margin: 0; }
+.acc-chev { font-size: 15px; color: var(--text-muted); transition: transform 0.15s; flex-shrink: 0; }
+details[open] > .acc-head .acc-chev { transform: rotate(180deg); }
+.acc-body { padding: 6px 20px 22px; border-top: 0.5px solid var(--border); }
+
+/* 근거(§5) — 표현 대조 + 답변 비교 */
+.expr-diff { display: flex; gap: 32px; flex-wrap: wrap; }
+.expr-diff .ed-col { flex: 1; min-width: 200px; }
+.expr-diff .ed-label { font-size: 11px; color: var(--text-muted); margin: 0 0 10px; }
+.expr-diff .ed-chip { display: inline-flex; align-items: center; font-size: 12px; padding: 4px 10px; border-radius: 20px; margin: 0 6px 8px 0; }
+.expr-diff .ed-chip.new { background: var(--bg-success); color: var(--text-success); }
+.expr-diff .ed-chip.gone { background: var(--bg-warning); color: var(--text-warning); text-decoration: line-through; }
+.src-change { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); background: var(--surface-1); border-radius: var(--radius); padding: 10px 14px; margin-top: 30px; }
+.src-change .arrow { color: var(--text-muted); }
+mark.ours { background: #DCE9C8; padding: 1px 3px; border-radius: 3px; font-weight: 500; }
+mark.comp { background: #E8E5DA; padding: 1px 3px; border-radius: 3px; }

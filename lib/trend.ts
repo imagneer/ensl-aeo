@@ -65,16 +65,48 @@ export interface TrendComparisonWindow {
 /** 'YYYY-MM-DD'(KST 달력 날짜)에 일수를 더한다. 순수 달력 계산이라 UTC로 취급한다
  *  (lib/supabase.ts fetchExpiredDiagnoses와 같은 이유 — 시간대 변환이 필요 없는
  *  달력 날짜 덧셈에 '+09:00'을 섞으면 자정 근처에서 하루씩 밀리는 함정이 있다). */
-function addDaysKST(dateKST: string, days: number): string {
+export function addDaysKST(dateKST: string, days: number): string {
   const d = new Date(`${dateKST}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
 /** 'YYYY-MM-DD' → "8/19" 형식 (프로토타입 라벨 그대로). */
-function formatMD(dateKST: string): string {
+export function formatMD(dateKST: string): string {
   const d = new Date(`${dateKST}T00:00:00Z`);
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+/**
+ * [periodStartUtc, periodEndUtc) 구간(UTC ISO, KST 자정 경계로 이미 정렬된 값)을
+ * KST 달력 날짜('YYYY-MM-DD') 목록으로 펼친다. 그래프의 x축 날짜 라벨과, 질문마다
+ * 다를 수 있는 daily 집계 행을 "같은 날짜 슬롯"에 맞춰 정렬하는 데 쓴다 — 질문
+ * A는 7일 다 있고 질문 B는 하루가 빠졌을 때, 그 빠진 자리를 null로 남겨야
+ * 그래프에서 "그날은 못 쟀다"가 정확히 보인다(값을 이어붙이면 안 됨).
+ */
+export function enumerateKstDays(periodStartUtc: string, periodEndUtc: string): string[] {
+  const days: string[] = [];
+  const end = new Date(periodEndUtc).getTime();
+  let cursorMs = new Date(periodStartUtc).getTime();
+  while (cursorMs < end) {
+    const kst = new Date(cursorMs + 9 * 60 * 60 * 1000);
+    const y = kst.getUTCFullYear();
+    const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(kst.getUTCDate()).padStart(2, '0');
+    days.push(`${y}-${m}-${d}`);
+    cursorMs += 24 * 60 * 60 * 1000;
+  }
+  return days;
+}
+
+/** aggregated_metrics의 period_start(UTC ISO, KST 자정)를 그 KST 달력 날짜로 바꾼다.
+ *  enumerateKstDays가 만든 날짜 문자열과 직접 비교(Map 키)하려고 같은 변환을 쓴다. */
+export function kstDayFromPeriodStart(periodStartUtc: string): string {
+  const kst = new Date(new Date(periodStartUtc).getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 /**
