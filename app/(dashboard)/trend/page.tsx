@@ -22,6 +22,7 @@ import {
 } from '@/lib/trend';
 import { ENGINE_CONFIG, type EngineName } from '@/lib/engine-config';
 import { TrendPlacementChart, type TrendChartSeries } from '@/components/TrendPlacementChart';
+import { TrendTipsModal } from '@/components/TrendTipsModal';
 
 function engineLabel(engine: string): string {
   return ENGINE_CONFIG[engine as EngineName]?.label ?? engine;
@@ -145,6 +146,19 @@ export default async function TrendPage({
 
   const featured = selectFeaturedPlacementQueries(transitions, 4);
   const queryTextById = new Map(placementQueries.map((q) => [q.id, q.queryText]));
+
+  // "이번 진단에서 확인된 변화" 요약 카드용 — 자리 질문 9개 전체 기준(TOP4로
+  // 안 좁힘). watchingExamples는 |초반-후반 델타|가 큰 순으로 최대 4개만
+  // 보여준다(9개를 다 늘어놓으면 위 아코디언과 화면이 너무 길어짐).
+  const confirmedTransitions = transitions.filter((t) => t.ownTrend.confidence === 'confirmed');
+  const watchingTransitions = transitions.filter((t) => t.ownTrend.confidence !== 'confirmed');
+  const watchingExamples = [...watchingTransitions]
+    .sort(
+      (a, b) =>
+        Math.abs((b.periodBRate ?? 0) - (b.periodARate ?? 0)) -
+        Math.abs((a.periodBRate ?? 0) - (a.periodARate ?? 0))
+    )
+    .slice(0, 4);
 
   // 근거(초반/후반 실제 답변) — TOP4로 뽑힌 질문만, 배치로 한 번에.
   const featuredIds = featured.map((f) => f.queryId);
@@ -330,6 +344,84 @@ export default async function TrendPage({
           </div>
         </details>
       </section>
+
+      <section>
+        <h2 className="section-title">이번 진단에서 확인된 변화</h2>
+        <p className="section-desc">
+          자리 질문 {placementQueries.length}개 전체를 기준으로, 3일 연속 같은 방향으로 확인된 것과 아직 등락이
+          섞여 지켜보는 중인 것을 나눴어요.
+        </p>
+        <div className="verify-cols">
+          <div className="verify-col confirmed">
+            <p className="vc-head">
+              <i className="ti ti-circle-check" />
+              확인된 변화 ({confirmedTransitions.length}개)
+            </p>
+            <p className="vc-sub">3일 연속 같은 방향으로 움직였어요.</p>
+            {confirmedTransitions.length === 0 ? (
+              <div className="vc-item">
+                <p className="vn">이번 진단에서 확인된 추세는 아직 없어요</p>
+                <p className="vd">
+                  오른쪽의 관찰 중인 신호가 다음 진단에서도 같은 방향이면, 그때 여기로 올라와요.
+                </p>
+              </div>
+            ) : (
+              confirmedTransitions.map((t) => (
+                <div className="vc-item" key={t.queryId}>
+                  <p className="vn">{queryTextById.get(t.queryId)}</p>
+                  <p className="vd">
+                    {t.periodARate !== null ? `${Math.round(t.periodARate * 100)}%` : '판정 불가'} →{' '}
+                    {t.periodBRate !== null ? `${Math.round(t.periodBRate * 100)}%` : '판정 불가'} · 최근{' '}
+                    {t.ownTrend.consecutiveDays}일 연속
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="verify-col watch">
+            <p className="vc-head">
+              <i className="ti ti-eye" />
+              관찰 중인 신호 ({watchingTransitions.length}개)
+            </p>
+            <p className="vc-sub">아직 등락이 섞여있어서, 다음 진단까지 더 지켜봐야 해요.</p>
+            {watchingExamples.map((t) => (
+              <div className="vc-item" key={t.queryId}>
+                <p className="vn">{queryTextById.get(t.queryId)}</p>
+                <p className="vd">
+                  {t.periodARate !== null ? `${Math.round(t.periodARate * 100)}%` : '판정 불가'} →{' '}
+                  {t.periodBRate !== null ? `${Math.round(t.periodBRate * 100)}%` : '판정 불가'}
+                </p>
+              </div>
+            ))}
+            {watchingTransitions.length > watchingExamples.length && (
+              <p className="vd" style={{ marginTop: 8 }}>
+                +{watchingTransitions.length - watchingExamples.length}개 더 있어요
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <div className="tip-box">
+        <span className="tip-badge">TIP</span>
+        <p className="tip-title">다음 진단에서도 같은 방향인지 확인해보세요.</p>
+        <p className="tip-desc">
+          한 번의 7일 관측만으로는 확정하기 어려운 변화도 있어요. 그리고 진단마다 질문이 달라지면 이번 흐름과
+          다음 흐름을 같은 기준으로 겹쳐볼 수 없어요 — 질문이 같아야 추세를 비교할 수 있어요.
+        </p>
+        <TrendTipsModal />
+      </div>
+
+      <div className="done-cta">
+        <p className="done-title">
+          {brandName}의 {sequence}차 진단이 끝났어요.
+          <br />
+          다음 진단은 새로운 7일로 다시 시작돼요.
+        </p>
+        <a className="done-btn" href={`/brand-awareness?brand=${brandId}`}>
+          브랜드 인지로 돌아가기 <span className="done-arrow">→</span>
+        </a>
+      </div>
     </>
   );
 }

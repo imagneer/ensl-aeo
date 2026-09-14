@@ -754,3 +754,26 @@ details[open] > .acc-head .acc-chev { transform: rotate(180deg); }
 .src-change .arrow { color: var(--text-muted); }
 mark.ours { background: #DCE9C8; padding: 1px 3px; border-radius: 3px; font-weight: 500; }
 mark.comp { background: #E8E5DA; padding: 1px 3px; border-radius: 3px; }
+
+/* 확인된 변화 vs 관찰 중 (.verify-cols) — V1.1 §5.
+   ⚠️ 프로토타입엔 이 CSS만 있고 실제 HTML 마크업은 없었다(2026-09-14
+   확인 — Desktop 원본도 동일). 색상·레이아웃 값은 프로토타입 CSS 그대로
+   가져오고, 안에 들어갈 내용 구조는 지시서 텍스트 설명 기반으로 새로 짰다. */
+.verify-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.verify-col { border-radius: 12px; padding: 18px; }
+.verify-col.confirmed { background: var(--bg-success); }
+.verify-col.watch { background: var(--bg-warning); }
+.verify-col .vc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 14px; font-weight: 500; }
+.verify-col.confirmed .vc-head { color: var(--text-success); }
+.verify-col.watch .vc-head { color: var(--text-warning); }
+.verify-col .vc-sub { font-size: 12px; margin: 0 0 14px; }
+.verify-col.confirmed .vc-sub { color: var(--text-success); opacity: 0.85; }
+.verify-col.watch .vc-sub { color: var(--text-warning); opacity: 0.85; }
+.vc-item { background: var(--surface-2); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; }
+.vc-item:last-child { margin-bottom: 0; }
+.vc-item .vn { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+.vc-item .vd { font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+
+@media (max-width: 700px) {
+  .verify-cols { grid-template-columns: 1fr; }
+}
