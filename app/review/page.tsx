@@ -19,6 +19,7 @@ const ITEM_TYPE_LABEL: Record<string, string> = {
   brand_one_liner_conflict: '잘못된 인지',
   feature_conflict_summary: '서로 다르게 설명하는 지점',
   narrative_lesson: '엔슬의 제안',
+  placement_expression_match: '추천 표현 ↔ 소개 특징 매칭',
 };
 
 const REASON_CATEGORIES: ReviewReasonCategory[] = ['과잉해석', '사실불일치', '표현누락', '문체톤', '기타'];

@@ -9,6 +9,7 @@ import {
   fetchAggregatedKeywordRowsForQueries,
   fetchLatestBrandOneLiner,
   fetchPlacementNarrativeTop10,
+  fetchPlacementExpressionClassificationsForDiagnosis,
   fetchBrandOwnedChannels,
   fetchAnswerSourceUrls,
   fetchCurrentReviewItemsForDiagnosis,
@@ -16,7 +17,7 @@ import {
 } from '@/lib/supabase';
 import { kstDayBoundsUtc, todayKST } from '@/lib/aggregator';
 import { fetchGapFeatureUniverse } from '@/lib/mention-feature-roles';
-import { buildAwarenessFeatureTop10, markTop10Overlap } from '@/lib/gap';
+import { buildCategoryComparison } from '@/lib/gap';
 import { buildQueryPositionStats, selectHeroQuery } from '@/lib/brand-position';
 import { buildSourceAnalysis, type SourceAnalysisResult } from '@/lib/source-analysis';
 
@@ -160,6 +161,7 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
     keywordRows,
     candidates,
     placementTop10,
+    expressionClassifications,
     ownedChannels,
     awarenessUrls,
     placementUrls,
@@ -170,6 +172,7 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
     fetchAggregatedKeywordRowsForQueries(placementQueryIds, periodStart, periodEnd),
     fetchGapFeatureUniverse(brandId, diagnosis.id),
     fetchPlacementNarrativeTop10(diagnosis.id),
+    fetchPlacementExpressionClassificationsForDiagnosis(diagnosis.id, sessionClient),
     fetchBrandOwnedChannels(brandId),
     fetchAnswerSourceUrls(brandId, '인지', periodStart, periodEnd),
     fetchAnswerSourceUrls(brandId, '자리', periodStart, periodEnd),
@@ -195,11 +198,7 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
   );
   const heroQuery = selectHeroQuery(positionStats);
 
-  const awarenessTop10 = buildAwarenessFeatureTop10(candidates);
-  const overlap = markTop10Overlap(
-    awarenessTop10.map((f) => f.featureName),
-    placementTop10?.items.map((f) => f.keyword) ?? []
-  );
+  const categoryComparison = buildCategoryComparison(candidates, expressionClassifications);
 
   const ownedPatterns = ownedChannels.map((c) => c.pattern);
   const awarenessSource = buildSourceAnalysis(awarenessUrls, ownedPatterns);
@@ -302,63 +301,58 @@ export default async function GapPage({ searchParams }: { searchParams: Promise<
         </p>
       </div>
 
-      {/* TOP10 비교 */}
-      <p className="section-title">특징 TOP10 비교 — 소개 vs 추천</p>
+      {/* 카테고리별 비교 (작업지시서_표현정규화_2026-09-16_V1.2 §5단계 — TOP10 순위 대조를 대체) */}
+      <p className="section-title">카테고리별 비교 — 소개 vs 추천</p>
       <p className="section-desc">
         브랜드 한 줄 특징 후보 {candidates.length}개 전체 vs 자리질문 {placementQueries.length}개 답변 전체
-        {placementTop10 ? `(${placementTop10.appearedRuns}건)` : ''}에서 뽑은 표현.
+        {placementTop10 ? `(${placementTop10.appearedRuns}건)` : ''}에서 뽑은 표현을, 소개 특징에 이미 쓰인
+        7개 카테고리 기준으로 나란히 봅니다.
       </p>
 
-      <div className="narrative-pair" style={{ alignItems: 'stretch' }}>
-        <div className="narrative-card" style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border-strong)' }}>
-          <p className="n-label">소개 특징 TOP10</p>
-          <div className="expr-list">
-            {awarenessTop10.map((f, i) => (
-              <div className={`expr-row${overlap.awarenessMatched[i] ? ' expr-row-matched' : ''}`} key={f.featureName}>
-                <p className="en">
-                  {i + 1}. {f.featureName}
+      {expressionClassifications.length === 0 ? (
+        <p className="es-text" style={{ fontSize: 13, marginBottom: 24 }}>
+          아직 계산되지 않았어요 — 진단 완료 다음날 자동으로 채워져요.
+        </p>
+      ) : (
+        <div style={{ marginBottom: 8 }}>
+          {categoryComparison.map((row) => (
+            <div
+              className="narrative-card"
+              key={row.category}
+              style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border-strong)', marginBottom: 10 }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+                <p className="n-label" style={{ margin: 0 }}>
+                  {row.category}
                 </p>
-                <span className="ec" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
-                  {f.dayCount}/{f.dayTotal}일
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  소개 특징 {row.awarenessCount}개 · 추천 등장 {Math.round(row.placementRate * 100)}% (
+                  {row.placementOccurrence}/{row.appearedRuns}건 중)
                 </span>
               </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="narrative-card" style={{ background: 'var(--surface-2)', border: '0.5px solid var(--border-strong)' }}>
-          <p className="n-label">추천 표현 TOP10</p>
-          {placementTop10 ? (
-            <div className="expr-list">
-              {placementTop10.items.map((f, i) => (
-                <div className={`expr-row${overlap.placementMatched[i] ? ' expr-row-matched' : ''}`} key={f.keyword}>
-                  <p className="en">
-                    {i + 1}. {f.keyword}
-                  </p>
-                  <span className="ec" style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
-                    {Math.round(f.rate * 100)}% · {f.count}건
-                  </span>
-                </div>
-              ))}
+              {row.topAwarenessFeatureNames.length > 0 && (
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '8px 0 0' }}>
+                  소개: {row.topAwarenessFeatureNames.join(', ')}
+                </p>
+              )}
+              {row.matchedFeatureNames.length > 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--text-brand)', fontWeight: 500, margin: '4px 0 0' }}>
+                  추천에서도 구체적으로 확인됨: {row.matchedFeatureNames.join(', ')}
+                </p>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                  카테고리는 겹치지만, 추천에서 구체적으로 같은 특징까지 확인되진 않았어요.
+                </p>
+              )}
             </div>
-          ) : (
-            <p className="es-text" style={{ fontSize: 13 }}>
-              아직 계산되지 않았어요 — 진단 완료 다음날 자동으로 채워져요.
-            </p>
-          )}
+          ))}
         </div>
-      </div>
-      <p className="caption-note" style={{ marginBottom: 8 }}>
-        초록 배경 = 핵심 단어가 겹치는 표현이에요(예: &quot;365일 연중무휴 진료&quot; ↔ &quot;화곡역 1분 거리에서
-        365일 진료&quot; — &quot;365일&quot;이 공통). 정확히 같은 문구를 찾는 게 아니라 낱말 겹침만 보기 때문에,
-        &quot;협진&quot;·&quot;임플란트&quot;처럼 흔한 단어가 우연히 겹쳐도 강조될 수 있어요 — 눈으로 한 번 더
-        확인해보는 게 안전해요. 추천 쪽은 자리질문 답변 원문 전체를 다시 분석한 결과예요(집계 지연 영향 없음).
-      </p>
+      )}
       <p className="caption-note" style={{ marginBottom: 24 }}>
-        참고: 원문에 실제로 있는 표현인데 TOP10엔 안 잡히는 경우가 있어요 — 여러 브랜드를 한 문장에 나열하는
-        답변에서 특정 브랜드만 가리키는 게 아니거나, 한 문장에 여러 내용이 섞여 있을 때 대표 표현으로 다른 부분이
-        뽑히는 경우가 있어서예요. TOP10은 대표 표현 선정 방식의 한계가 있어 — 특정 문구의 정확한 빈도가 궁금하면
-        원문을 직접 대조하는 게 더 정확해요.
+        &quot;추천에서도 구체적으로 확인됨&quot;은 카테고리가 같다는 이유만으로 묶은 게 아니라, 같은 카테고리
+        안에서 세부 의미까지 같다고 판정된 것만 표시해요(예: &quot;365일 연중무휴 진료&quot;와 &quot;일요일
+        진료&quot;는 같은 특징으로 보지만, 같은 카테고리라도 서로 다른 구체적 주장이면 묶지 않아요). 7개 카테고리
+        어디에도 안 맞는 추천 표현은 이 비교에서 빠져요 — 반복해서 나타나면 카테고리를 보완할지 별도로 검토해요.
       </p>
 
       {/* AI는 어디서 정보를 가져올까 */}

@@ -11,97 +11,76 @@
  * 이유(작업지시서_간극화면_교체_2026-09-09_V1.0.md §0): 포괄적 특징을
  * 구조적으로 불리하게 다뤄서 hero가 엉뚱하게 뽑히고, 표본이 얇았고,
  * "AI 내부에서 선택 이유로 작동했나"를 암묵적으로 다시 주장하게 됐다.
- * 새 설계는 뺄셈이 아니라 대조 — 소개 TOP10과 추천 TOP10을 나란히 놓고
- * "얼마나 겹치는가"만 관측 사실로 보여준다. 옛 코드가 필요하면 git
- * history(이 커밋 이전)에서 그대로 복원 가능.
+ * 새 설계는 뺄셈이 아니라 대조 — 소개와 추천을 나란히 놓고 "얼마나
+ * 겹치는가"만 관측 사실로 보여준다. 옛 코드가 필요하면 git history(이
+ * 커밋 이전)에서 그대로 복원 가능.
+ *
+ * ⚠️ 2026-09-16 재교체 — TOP10끼리 순위로 맞대고 문자열 부분매칭(낱말
+ * 겹침)으로 강조하던 방식(buildAwarenessFeatureTop10/markTop10Overlap,
+ * 이 커밋 이전 history에서 복원 가능)을 버렸다. 왼쪽(소개 특징)은 LLM이
+ * 원자 표현을 묶어 새로 요약한 라벨(가공 후)이고 오른쪽(추천 표현)은
+ * 원문 그대로의 원자 표현(가공 전)이라 처리 단계 자체가 달라서, 부분
+ * 문자열 매칭으로는 과다/과소 집계가 둘 다 실측 확인됐다
+ * (작업지시서_표현정규화_2026-09-16_V1.2 §왜). 대신 양쪽을 기존 7개
+ * 카테고리(brand_feature_candidates.category와 동일 체계)로 분류하고,
+ * 카테고리 안에서만 왼쪽 클러스터에 세부 매칭한다(lib/placement-expression-classifier.ts).
  */
 
-import type { StoredBrandFeatureCandidate } from './supabase';
+import { FEATURE_CATEGORIES, type FeatureCategory, type StoredBrandFeatureCandidate, type StoredPlacementExpressionClassification } from './supabase';
 
-export interface AwarenessFeatureFrequency {
-  featureName: string;
-  questionCount: number;
-  questionTotal: number;
-  engineCount: number;
-  engineTotal: number;
-  dayCount: number;
-  dayTotal: number;
+// ── 카테고리 비교 (작업지시서_표현정규화_2026-09-16_V1.2 §5단계) ──
+//
+// 왼쪽(소개 특징)과 오른쪽(추천 표현, lib/placement-expression-classifier.ts가
+// 분류한 결과)을 TOP10끼리 순위로 맞대는 대신, 기존 7개 카테고리 기준으로
+// "소개 강도 vs 추천 등장 비율"을 나란히 보여준다. 카테고리가 null(미분류)인
+// 오른쪽 표현은 이 집계에서 제외한다 — 7개 중 어디에도 안 맞는다고 판정된
+// 것이라 카테고리 비교표에 넣을 자리가 없다(별도 관찰 로그,
+// fetchUncategorizedExpressionsForBrand 참고).
+
+export interface CategoryComparisonRow {
+  category: FeatureCategory;
+  awarenessCount: number;
+  /** 이 카테고리의 왼쪽 특징 중 intensityScore 상위 3개 — 화면에 예시로 보여줄 용도 */
+  topAwarenessFeatureNames: string[];
+  placementOccurrence: number;
+  /** 분모 — 매니페스토 3원칙(비율은 반드시 분모 포함)에 따라 화면에 같이 표시할 것 */
+  appearedRuns: number;
+  placementRate: number;
+  /** 카테고리 안에서 세부 의미까지 같다고 판정된 왼쪽 특징 이름(중복 제거) */
+  matchedFeatureNames: string[];
 }
 
-/**
- * "소개 특징 TOP10" — brand_feature_candidates를 intensityScore(질문·AI·
- * 날짜 커버리지 비율의 평균, brand-one-liner.ts evaluateGroups 참고) 내림차순
- * 정렬해서 상위 N개만 낸다.
- *
- * ⚠️ intensityScore 1등이 실제 "브랜드 한 줄"에 반영된다는 보장은 없다
- * (2026-09-09 확인 — 최종 반영 여부는 이 점수 뒤에 붙는 별도 LLM 자동검수
- * 단계에서 갈릴 수 있다). 이 목록은 "반영 여부"가 아니라 "커버리지가 가장
- * 넓은 특징이 뭔가"를 보여주는 순수 순위표라 반영 배지를 붙이지 않는다
- * (2026-09-10 루아 확인).
- */
-export function buildAwarenessFeatureTop10(
+export function buildCategoryComparison(
   candidates: StoredBrandFeatureCandidate[],
-  topN = 10
-): AwarenessFeatureFrequency[] {
-  return [...candidates]
-    .sort((a, b) => b.intensityScore - a.intensityScore)
-    .slice(0, topN)
-    .map((c) => ({
-      featureName: c.featureName,
-      questionCount: c.questionCount,
-      questionTotal: c.questionTotal,
-      engineCount: c.engineCount,
-      engineTotal: c.engineTotal,
-      dayCount: c.dayCount,
-      dayTotal: c.dayTotal,
-    }));
-}
+  classifications: StoredPlacementExpressionClassification[]
+): CategoryComparisonRow[] {
+  const candidateById = new Map(candidates.map((c) => [c.id, c]));
+  const appearedRuns = classifications[0]?.appearedRuns ?? 0;
 
-/**
- * "이 단어가 있으면 사실상 아무 표현하고나 다 묶인다"는 흔한 운영 표현
- * — 매칭 신호로 못 쓴다(전부 초록불이 켜지면 강조가 의미 없어진다).
- * 임플란트·협진처럼 이 브랜드/업종에서 여전히 구별력 있는 단어는 남긴다
- * (2026-09-10 실측: 소개 TOP10 10개 중 7개가 이 목록으로 걸러낸 뒤에도
- * 적어도 하나씩 매칭돼서 과소 매칭도 아니었다).
- */
-const OVERLAP_STOPWORDS = new Set([
-  '진료', '치료', '치과', '시술', '시스템', '제공', '관리', '가능', '서비스', '병원', '환자', '등', '및', '일반적',
-]);
+  return FEATURE_CATEGORIES.map((category) => {
+    const awarenessInCategory = candidates
+      .filter((c) => c.category === category)
+      .sort((a, b) => b.intensityScore - a.intensityScore);
 
-/** 괄호·중점·슬래시·쉼표로 뭉쳐 쓴 표현을 낱말 단위로 쪼갠다. */
-function extractOverlapTokens(phrase: string): string[] {
-  return phrase
-    .replace(/[()·/,"'「」]/g, ' ')
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 2 && !OVERLAP_STOPWORDS.has(t));
-}
+    const placementInCategory = classifications.filter((c) => c.category === category);
+    const placementOccurrence = placementInCategory.reduce((sum, c) => sum + c.occurrenceCount, 0);
 
-/**
- * 소개 TOP10과 추천 TOP10 사이 "핵심 단어 겹침" 자동 강조(2026-09-10
- * 작업지시 — LLM 판정 아니고 키워드 매칭). 완전히 같은 문구가 아니어도
- * 겹치는 걸로 본다: 한쪽 표현을 낱말로 쪼갠 뒤, 그 낱말이 다른 쪽 표현
- * 문자열에 부분 포함되면 매칭(예: "365일 연중무휴 진료" ↔ "화곡역 1분
- * 거리에서 365일 진료" — "365일" 토큰이 공통).
- *
- * ⚠️ 정밀 매칭이 아니다 — 조사·어미 변형까지 다 처리하는 형태소 분석이
- * 아니라 공백/구두점 기준 낱말 분리 + 부분 문자열 포함이다. "협진"·
- * "임플란트"처럼 흔히 쓰는 단어가 우연히 겹쳐도 매칭으로 잡힌다 — 그래서
- * "정확히 같은 문구가 아닐 수 있다"는 캡션을 화면에 계속 유지한다.
- */
-export function markTop10Overlap(
-  awarenessFeatureNames: string[],
-  placementKeywords: string[]
-): { awarenessMatched: boolean[]; placementMatched: boolean[] } {
-  const awarenessTokens = awarenessFeatureNames.map(extractOverlapTokens);
-  const placementTokens = placementKeywords.map(extractOverlapTokens);
+    const matchedFeatureNames = [
+      ...new Set(
+        placementInCategory
+          .map((c) => (c.matchedFeatureId ? candidateById.get(c.matchedFeatureId)?.featureName : null))
+          .filter((name): name is string => !!name)
+      ),
+    ];
 
-  const awarenessMatched = awarenessFeatureNames.map((_, i) =>
-    placementKeywords.some((p) => awarenessTokens[i].some((t) => p.includes(t)))
-  );
-  const placementMatched = placementKeywords.map((_, j) =>
-    awarenessFeatureNames.some((a) => placementTokens[j].some((t) => a.includes(t)))
-  );
-
-  return { awarenessMatched, placementMatched };
+    return {
+      category,
+      awarenessCount: awarenessInCategory.length,
+      topAwarenessFeatureNames: awarenessInCategory.slice(0, 3).map((c) => c.featureName),
+      placementOccurrence,
+      appearedRuns,
+      placementRate: appearedRuns > 0 ? placementOccurrence / appearedRuns : 0,
+      matchedFeatureNames,
+    };
+  }).filter((row) => row.awarenessCount > 0 || row.placementOccurrence > 0);
 }

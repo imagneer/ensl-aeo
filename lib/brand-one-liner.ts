@@ -74,6 +74,7 @@ import {
   type StoredBrandExpression,
   type StoredDiagnosis,
   type FeatureCategory,
+  FEATURE_CATEGORIES,
   type FeatureTier,
   type BrandFeatureCandidateToSave,
   type BrandFeatureConflictToSave,
@@ -127,9 +128,7 @@ function buildUniqueExpressions(expressions: StoredBrandExpression[]): UniqueExp
 
 // ── 3단계: 비슷한 표현 묶기 (LLM, Sonnet) ──
 
-const CATEGORIES: FeatureCategory[] = [
-  '치료분야', '진료체계', '의료역량', '환자상황', '이용편의성', '지역_조건', '일반적표현',
-];
+const CATEGORIES: FeatureCategory[] = FEATURE_CATEGORIES;
 
 interface RawGroup {
   label: string;

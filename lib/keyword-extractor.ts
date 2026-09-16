@@ -109,10 +109,27 @@ export interface ParagraphKeywords {
  * 다시 짝짓는다. (LLM에게 snapshotId 문자열을 그대로 돌려달라고 하는 것보다
  * 정수 index가 오타·변형 위험이 없어서 더 안전하다)
  */
-function buildExtractionPrompt(brandName: string, paragraphs: BrandParagraph[]): string {
+/**
+ * 원자 분해 규칙(6번) — 작업지시서_표현정규화_2026-09-16_V1.2 §2단계. "짧은 어구로
+ * 뽑아라"(규칙 2)는 길이 제약일 뿐 개념 분리를 강제하지 않아서, "화곡역 1분 거리에서
+ * 365일 진료"처럼 서로 다른 개념(위치+진료시간)이 한 표현으로 뽑히는 사례가 실측
+ * 확인됐다(간극 화면 TOP10 과다집계 원인, 같은 문서 §왜).
+ *
+ * ⚠️ 이 규칙은 lib/placement-narrative.ts(자리질문 추천 표현)에서만 켠다
+ * (atomicDecomposition=true). daily 집계(lib/aggregator.ts)의 노출 키워드나
+ * 소개 특징 추출(lib/brand-expression-extractor.ts)은 이 작업 범위 밖이라 건드리지
+ * 않는다 — 기본값 false로 기존 동작을 그대로 유지한다(무관한 화면에 영향 안 주려고).
+ */
+const ATOMIC_DECOMPOSITION_RULE = `6. 한 표현 안에 서로 다른 개념(예: 위치, 진료시간, 진료방식, 시설 등)이 섞여 있으면, 각 개념을 별도의 표현으로 나눠서 뽑아라. 하나로 뭉쳐서 뽑지 마라. 예: "화곡역 1분 거리에서 365일 진료" → "화곡역 1분 거리"와 "365일 진료" 두 개로 분리.`;
+
+function buildExtractionPrompt(
+  brandName: string,
+  paragraphs: BrandParagraph[],
+  atomicDecomposition = false
+): string {
     const numberedParagraphs = paragraphs
     .map((p, i) => `[문단 ${i}]\n${p.paragraphText}`)
-    .join('\n\n'); 
+    .join('\n\n');
 
     return `아래는 AI 답변 엔진이 "${brandName}"에 대해 언급한 문단들이다. 문단은 여러 개고, 각 문단은 [문단 N] 형식으로 번호가 붙어 있다.
 
@@ -122,6 +139,7 @@ function buildExtractionPrompt(brandName: string, paragraphs: BrandParagraph[]):
 3. 그 문단이 "${brandName}"이 아니라 다른 병원·브랜드를 설명하는 내용이면, "${brandName}"과 무관한 표현은 절대 포함하지 마라.
 4. 문단이 이름만 나열하고 아무 설명이 없으면(예: 목록에 이름만 있는 경우), 그 문단은 빈 배열로 남겨라.
 5. 확실하지 않으면 포함하지 마라. 없는 내용을 만들어내지 마라.
+${atomicDecomposition ? ATOMIC_DECOMPOSITION_RULE : ''}
 
 문단:
 ${numberedParagraphs}`;
@@ -139,6 +157,9 @@ ${numberedParagraphs}`;
  * @param usageContext 호출 1건 usage 로깅용 맥락(lib/llm-usage.ts, 2026-09-04
  *   예산 사고 후속 안전장치). 생략하면 kind='target', runKind='manual'로 남는다 —
  *   app/api/test-keyword-extraction처럼 집계 실행 밖에서 단발로 부르는 곳용.
+ * @param atomicDecomposition 서로 다른 개념이 섞인 표현을 나눠 뽑게 하는 규칙을
+ *   추가할지(기본 false). lib/placement-narrative.ts만 true로 쓴다 — 다른 호출부
+ *   (daily 집계, 소개 특징 추출)는 이 작업 범위 밖이라 기존 동작을 그대로 유지.
  */
 export async function extractExpressionsFromParagraphs(
   brandName: string,
@@ -149,7 +170,8 @@ export async function extractExpressionsFromParagraphs(
     brandId?: string | null;
     queryId?: string | null;
     engine?: string | null;
-  }
+  },
+  atomicDecomposition = false
 ): Promise<ParagraphKeywords[]> {
   if (paragraphs.length === 0) return [];
 
@@ -169,7 +191,7 @@ export async function extractExpressionsFromParagraphs(
     engine: usageContext?.engine ?? null,
   };
 
-  const prompt = buildExtractionPrompt(brandName, paragraphs);
+  const prompt = buildExtractionPrompt(brandName, paragraphs, atomicDecomposition);
 
   const response = await fetch(ANTHROPIC_API_URL, {
     method: 'POST',

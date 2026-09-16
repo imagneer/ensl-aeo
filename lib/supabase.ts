@@ -375,12 +375,14 @@ export interface MentionToSave {
 
   /**
    * 연결의 확신도. 판정 규칙은 lib/citation-linker.ts 참고.
-   *   confirmed = 문단에 이 브랜드만 있었음
-   *   estimated = 문단에 브랜드가 여럿이라 어느 출처가 누구 근거인지 모름
-   *   none      = 문단에 출처가 아예 없었음
+   *   confirmed   = 문단에 이 브랜드만 있었음
+   *   estimated   = 문단에 브랜드가 여럿이라 어느 출처가 누구 근거인지 모름
+   *   none        = 문단에 출처가 아예 없었음(개별 관측)
+   *   unavailable = 이 엔진 자체가 "사용한 것"을 구조적으로 안 줌(2026-09-14,
+   *                 Perplexity Agent API 예외 — none과 절대 혼동 금지)
    * ⚠️ 이건 AI가 알려준 값이 아니라 엔슬의 판정이다.
    */
-  citationConfidence: 'confirmed' | 'estimated' | 'none';
+  citationConfidence: 'confirmed' | 'estimated' | 'none' | 'unavailable';
 }
 
 /**
@@ -480,7 +482,9 @@ export interface MentionForAggregation {
   snapshotId: string;
   brandId: string | null;
   rank: number;
-  sourceDomains: string[] | null;   
+  sourceDomains: string[] | null;
+  /** 'unavailable'이면 이 엔진 자체가 "사용한 것"을 안 줌(2026-09-14 Perplexity 예외) — hasCitation 판정(M/S/C 뱃지)이 이걸로 null(확인 불가)을 구분한다 */
+  citationConfidence: 'confirmed' | 'estimated' | 'none' | 'unavailable';
 }
 
 /**
@@ -494,7 +498,7 @@ export async function fetchMentionsForAggregation(
 
   const { data, error } = await supabaseAdmin
     .from('mentions')
-    .select('snapshot_id, brand_id, rank, source_domains')
+    .select('snapshot_id, brand_id, rank, source_domains, citation_confidence')
     .in('snapshot_id', snapshotIds);
 
   if (error) {
@@ -509,6 +513,7 @@ export async function fetchMentionsForAggregation(
     brandId: row.brand_id,
     rank: row.rank,
     sourceDomains: row.source_domains,
+    citationConfidence: row.citation_confidence,
   }));
 }
 
@@ -982,11 +987,13 @@ export interface AggregatedMetricToSave {
    * S(소스)/C(인용) 판정 — Day 17.x, M/S/C 뱃지용.
    * hasSource: true=자기 도메인이 참고 목록에 있었음 / false=참고 목록은 있는데 없었음 /
    *            null=이 엔진이 참고 목록 자체를 안 줌(확인 불가, 예: ChatGPT)
-   * hasCitation: true=자기 도메인이 실제 각주로 인용됨 / false=인용 안 됨
-   *              (retrievedSources 유무와 무관하게 항상 true/false로 판정 가능)
+   * hasCitation: true=자기 도메인이 실제 각주로 인용됨 / false=인용 안 됨 /
+   *              null=이 엔진이 "사용한 것" 자체를 구조적으로 안 줘서 확인 불가
+   *              (2026-09-14 추가, Perplexity Agent API 예외 — hasSource의 null과
+   *              같은 이유. false로 두면 "인용 안 함"이라는 실제와 다른 판정이 된다)
    */
   hasSource: boolean | null;
-  hasCitation: boolean;
+  hasCitation: boolean | null;
 
 }
 
@@ -1508,6 +1515,18 @@ export type FeatureCategory =
   | '지역_조건'
   | '일반적표현';
 
+/** FeatureCategory의 런타임 값 목록(단일 진실 소스) — enum 검증·LLM 프롬프트 나열용.
+ *  lib/brand-one-liner.ts, lib/placement-expression-classifier.ts가 같이 쓴다. */
+export const FEATURE_CATEGORIES: FeatureCategory[] = [
+  '치료분야',
+  '진료체계',
+  '의료역량',
+  '환자상황',
+  '이용편의성',
+  '지역_조건',
+  '일반적표현',
+];
+
 /**
  * 3개 조건(질문 2+/AI 3+/날짜 3+)을 각각 독립 판정한 뒤 몇 개를 충족했는지로
  * 정해진다(v1.2 결정 1) — 하나만 보고 판단하지 않음.
@@ -1640,6 +1659,170 @@ export async function fetchBrandFeatureCandidatesForDiagnosis(
   }));
 }
 
+// ── 추천 표현 카테고리 분류 (placement_expression_classifications, 작업지시서_표현정규화_2026-09-16_V1.2) ──
+//
+// "인지와 추천, 그 사이" 화면 TOP10 비교를, 서로 다른 처리 단계(왼쪽=가공 후
+// 클러스터 라벨 / 오른쪽=가공 전 원자 표현)를 문자열로 억지로 맞춰보던 방식에서
+// "양쪽 다 기존 7개 카테고리(brand_feature_candidates.category와 동일 체계)로
+// 분류 후, 같은 카테고리 안에서만 왼쪽 클러스터에 세부 매칭"으로 바꾼다.
+// docs/day24-placement-expression-classification-schema.sql 먼저 Supabase에 적용해야 한다.
+
+export interface PlacementExpressionClassificationToSave {
+  diagnosisId: string;
+  brandId: string;
+  expression: string;
+  occurrenceCount: number;
+  appearedRuns: number;
+  /** null = 7개 카테고리 중 어디에도 안 맞음("일반적표현"으로 뭉개지 않는다 — 2026-09-16 루아 지시) */
+  category: FeatureCategory | null;
+  /** 카테고리 안에서 왼쪽 특징과 세부 의미까지 같다고 판정된 경우만. 카테고리만 같고 특징은 다르면 null. */
+  matchedFeatureId: string | null;
+  judgedBy: string;
+  reviewedBy: string;
+}
+
+export interface StoredPlacementExpressionClassification {
+  id: string;
+  diagnosisId: string;
+  brandId: string;
+  expression: string;
+  occurrenceCount: number;
+  appearedRuns: number;
+  category: FeatureCategory | null;
+  matchedFeatureId: string | null;
+}
+
+/**
+ * 진단 재실행 시 델리트 후 재삽입 — brand_feature_candidates 회차 재생성과
+ * 같은 패턴(clearBrandOneLinerArtifacts 근처). 같은 표현이 중복으로 쌓이는 걸 막는다.
+ */
+export async function deletePlacementExpressionClassifications(diagnosisId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('placement_expression_classifications')
+    .delete()
+    .eq('diagnosis_id', diagnosisId);
+
+  if (error) {
+    throw new Error(`placement_expression_classifications 기존 행 삭제 실패: ${error.message}`);
+  }
+}
+
+/** 여러 건을 한 INSERT로 저장하고 생성된 id를 같은 순서로 돌려준다(saveBrandFeatureCandidates와 동일 패턴). */
+export async function savePlacementExpressionClassifications(
+  rows: PlacementExpressionClassificationToSave[]
+): Promise<string[]> {
+  if (rows.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('placement_expression_classifications')
+    .insert(
+      rows.map((r) => ({
+        diagnosis_id: r.diagnosisId,
+        brand_id: r.brandId,
+        expression: r.expression,
+        occurrence_count: r.occurrenceCount,
+        appeared_runs: r.appearedRuns,
+        category: r.category,
+        matched_feature_id: r.matchedFeatureId,
+        judged_by: r.judgedBy,
+        reviewed_by: r.reviewedBy,
+      }))
+    )
+    .select('id');
+
+  if (error) {
+    console.error('placement_expression_classifications 저장 실패:', error);
+    return [];
+  }
+  if (data.length !== rows.length) {
+    console.error(
+      `placement_expression_classifications 저장 개수 불일치: 입력 ${rows.length}건, 반환 ${data.length}건`
+    );
+  }
+  return data.map((row) => row.id);
+}
+
+export async function fetchPlacementExpressionClassificationsForDiagnosis(
+  diagnosisId: string,
+  client: SupabaseClient
+): Promise<StoredPlacementExpressionClassification[]> {
+  const { data, error } = await client
+    .from('placement_expression_classifications')
+    .select('id, diagnosis_id, brand_id, expression, occurrence_count, appeared_runs, category, matched_feature_id')
+    .eq('diagnosis_id', diagnosisId);
+
+  if (error) {
+    console.error('placement_expression_classifications 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    diagnosisId: row.diagnosis_id,
+    brandId: row.brand_id,
+    expression: row.expression,
+    occurrenceCount: row.occurrence_count,
+    appearedRuns: row.appeared_runs,
+    category: row.category,
+    matchedFeatureId: row.matched_feature_id,
+  }));
+}
+
+export interface UncategorizedExpressionSummary {
+  expression: string;
+  /** 이 표현이 관측된 진단 회차 수(회차마다 1건으로 셈 — 하루 안 반복 등은 이미 occurrenceCount로 뭉쳐 있음) */
+  diagnosisCount: number;
+  totalOccurrenceCount: number;
+  lastSeenDiagnosisId: string;
+}
+
+/**
+ * "7개 카테고리 중 어디에도 안 맞는" 표현이 브랜드별로 반복되는지 확인용
+ * (작업지시서_표현정규화_2026-09-16_V1.2 §2단계 — "반복되면 카테고리 보완 검토").
+ * 화면은 아직 없다 — 필요해지면 이 함수를 내부 도구에서 부른다. 표현 문자열
+ * 완전일치로만 묶는다(패러프레이즈 변형은 과소집계될 수 있음, 정밀 매칭 아님).
+ */
+export async function fetchUncategorizedExpressionsForBrand(
+  brandId: string,
+  client: SupabaseClient
+): Promise<UncategorizedExpressionSummary[]> {
+  const { data, error } = await client
+    .from('placement_expression_classifications')
+    .select('expression, occurrence_count, diagnosis_id, created_at')
+    .eq('brand_id', brandId)
+    .is('category', null)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('미분류 표현 조회 실패:', error);
+    return [];
+  }
+  if (!data) return [];
+
+  const byExpression = new Map<string, { diagnosisIds: Set<string>; totalOccurrence: number; lastDiagnosisId: string }>();
+  for (const row of data) {
+    const entry = byExpression.get(row.expression) ?? {
+      diagnosisIds: new Set<string>(),
+      totalOccurrence: 0,
+      lastDiagnosisId: row.diagnosis_id,
+    };
+    entry.diagnosisIds.add(row.diagnosis_id);
+    entry.totalOccurrence += row.occurrence_count;
+    entry.lastDiagnosisId = row.diagnosis_id;
+    byExpression.set(row.expression, entry);
+  }
+
+  return [...byExpression.entries()]
+    .map(([expression, v]) => ({
+      expression,
+      diagnosisCount: v.diagnosisIds.size,
+      totalOccurrenceCount: v.totalOccurrence,
+      lastSeenDiagnosisId: v.lastDiagnosisId,
+    }))
+    .sort((a, b) => b.diagnosisCount - a.diagnosisCount || b.totalOccurrenceCount - a.totalOccurrenceCount);
+}
+
 // ── AI 일치도 섹션 — 1·2번 칸(공통/일부) (Day21) ──
 
 /**
@@ -1758,7 +1941,8 @@ export type ReviewItemType =
   | 'brand_one_liner' // 브랜드 인지 화면 — 본문 한 줄 (반복확인/초기한줄)
   | 'brand_one_liner_conflict' // 브랜드 인지 화면 — '잘못된인지' 행
   | 'feature_conflict_summary' // 브랜드 인지 화면 3번 칸 — "서로 다르게 설명하는 지점"
-  | 'narrative_lesson'; // "인지와 추천, 그 사이" 화면 — "엔슬의 제안" 문장
+  | 'narrative_lesson' // "인지와 추천, 그 사이" 화면 — "엔슬의 제안" 문장
+  | 'placement_expression_match'; // "인지와 추천, 그 사이" 화면 — 추천 표현↔소개 특징 세부 매칭(작업지시서_표현정규화_2026-09-16_V1.2)
 
 export type ReviewItemStatus = 'pending' | 'approved' | 'rejected';
 
@@ -3064,6 +3248,8 @@ export interface QuerySnapshotMention {
   isTarget: boolean;
   sourceUrls: string[];
   sourceDomains: string[];
+  /** 'unavailable'이면 이 엔진 자체가 출처를 안 줌(2026-09-14 Perplexity 예외) — 화면에서 배지로 구분해야 함 */
+  citationConfidence: 'confirmed' | 'estimated' | 'none' | 'unavailable';
 }
 
 export interface QuerySnapshotRecord {
@@ -3107,7 +3293,7 @@ export async function fetchQuerySnapshotsWithMentions(
   const snapshotIds = snapshotRows.map((s) => s.id);
   const { data: mentionRows, error: mentionError } = await client
     .from('mentions')
-    .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains')
+    .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains, citation_confidence')
     .in('snapshot_id', snapshotIds);
 
   if (mentionError) {
@@ -3125,6 +3311,7 @@ export async function fetchQuerySnapshotsWithMentions(
       isTarget: m.is_target,
       sourceUrls: m.source_urls ?? [],
       sourceDomains: m.source_domains ?? [],
+      citationConfidence: m.citation_confidence,
     });
   }
 
@@ -3192,11 +3379,12 @@ export async function fetchQuerySnapshotsWithMentionsBatch(
     is_target: boolean;
     source_urls: string[] | null;
     source_domains: string[] | null;
+    citation_confidence: 'confirmed' | 'estimated' | 'none' | 'unavailable';
   }[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data: page, error: mentionError } = await client
       .from('mentions')
-      .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains')
+      .select('snapshot_id, brand_id, brand_name_raw, is_target, source_urls, source_domains, citation_confidence')
       .in('snapshot_id', snapshotIds)
       .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -3219,6 +3407,7 @@ export async function fetchQuerySnapshotsWithMentionsBatch(
       isTarget: m.is_target,
       sourceUrls: m.source_urls ?? [],
       sourceDomains: m.source_domains ?? [],
+      citationConfidence: m.citation_confidence,
     });
   }
 
