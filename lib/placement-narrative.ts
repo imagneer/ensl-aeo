@@ -43,7 +43,6 @@ import {
 } from './placement-expression-classifier';
 import { ANTHROPIC_MODEL, ANTHROPIC_MODEL_SONNET, MAX_LLM_CALLS_PER_RUN } from './llm-config';
 import { startUsageRun, getUsageRunSummary } from './llm-usage';
-import { sendIncidentAlert } from './email-alert';
 
 const BATCH_SIZE = 10;
 /** 분류 배치 하나마다 왼쪽 특징 목록(최대 40여개) 전체를 프롬프트에 같이 보내서
@@ -206,12 +205,10 @@ async function classifyAndSavePlacementExpressions(params: {
         `placement-expression-classifier가 MAX_LLM_CALLS_PER_RUN(${MAX_LLM_CALLS_PER_RUN})에 걸려 중단됨 — ` +
         `처리 ${i}/${allExpressions.length}건에서 멈춤 (diagnosisId=${diagnosisId})`;
       console.warn(`⚠️ ${capMessage}`);
-      void sendIncidentAlert({
-        platform: 'cron:compute-placement-narrative:classify',
-        errorType: 'llm_call_cap',
-        message: capMessage,
-        status: '남은 표현은 미분류 상태로 남음 — 다음 진단 실행 때는 재분류 대상 아님(이번 실행분만 부분 저장)',
-      });
+      // sendIncidentAlert(lib/email-alert.ts) 연동은 아직 안 함 — 그 파일은
+      // 별도 작업지시서(2026-09-14-incident-email-alert.md, 아직 미완료)
+      // 산출물이라 이 커밋에서 같이 커밋하면 검증 안 된 걸 끼워넣는 셈이라
+      // 뺐다. 그 작업이 끝나면 mention-feature-roles.ts와 같은 방식으로 연결할 것.
       break;
     }
 
