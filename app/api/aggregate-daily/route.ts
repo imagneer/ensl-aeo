@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { aggregateAllQueriesForDay, yesterdayKST } from '@/lib/aggregator';
 import { isAuthorizedCronRequest } from '@/lib/cron-auth';
 import { getUsageRunSummary } from '@/lib/llm-usage';
+import { sendIncidentAlert } from '@/lib/email-alert';
 
 // 2026-09-08 — 진단 종료 확인(브랜드 한 줄 합성, LLM 순차 호출 다수)은
 // /api/complete-diagnoses로 분리했다(day4-decision-schedule.md 추가 기록
@@ -45,6 +46,13 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error('daily 집계 실패:', error);
+
+    void sendIncidentAlert({
+      platform: 'cron:aggregate-daily',
+      errorType: 'unhandled_exception',
+      message: error instanceof Error ? error.message : String(error),
+      status: '이번 크론 실행 전체가 실패함 — 다음 실행 때 자동 재시도됨',
+    });
 
     return NextResponse.json(
       {

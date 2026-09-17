@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { runAlertCheckForDay } from '@/lib/alerts';
 import { yesterdayKST } from '@/lib/aggregator';
 import { isAuthorizedCronRequest } from '@/lib/cron-auth';
+import { sendIncidentAlert } from '@/lib/email-alert';
 
 export const maxDuration = 60; // 아직 실측 전이지만 aggregate-daily와 비슷한 성격(DB 읽기+계산)이라 같은 값
 
@@ -41,6 +42,13 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error('알림 판정 실패:', error);
+
+    void sendIncidentAlert({
+      platform: 'cron:check-alerts',
+      errorType: 'unhandled_exception',
+      message: error instanceof Error ? error.message : String(error),
+      status: '이번 크론 실행 전체가 실패함 — 다음 실행 때 자동 재시도됨',
+    });
 
     return NextResponse.json(
       {

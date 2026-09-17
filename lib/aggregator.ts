@@ -89,6 +89,7 @@ import { retryWithBackoff, isRetryableLLMError } from './retry';
 
 import { ENGINE_NAMES, type EngineName } from './engine-config';
 import { startUsageRun, getUsageRunSummary, type LlmCallKind, type LlmRunKind } from './llm-usage';
+import { sendIncidentAlert } from './email-alert';
 import {
   MAX_LLM_CALLS_PER_RUN,
   ESTIMATED_TOKENS_PER_KEYWORD_CALL,
@@ -926,11 +927,17 @@ export async function aggregateAllQueriesForDay(dateKST: string): Promise<DailyA
       // "정상 종료가 아니었다"는 걸 바로 알 수 있게 한다.
       if (getUsageRunSummary().llmCalls >= MAX_LLM_CALLS_PER_RUN) {
         summary.stoppedByLlmCallCap = true;
-        console.error(
-          `⚠️ aggregate-daily가 MAX_LLM_CALLS_PER_RUN(${MAX_LLM_CALLS_PER_RUN})에 걸려 중단됨 — ` +
-            `날짜=${dateKST}, 지금까지 처리=${summary.attempted}건. 정상 규모(하루 최대 288회)를 크게 넘었다는 뜻이라 ` +
-            `버그(예: 재시도 큐 폭주)인지 브랜드/쿼리가 실제로 늘어난 건지 확인이 필요하다.`
-        );
+        const capMessage =
+          `aggregate-daily가 MAX_LLM_CALLS_PER_RUN(${MAX_LLM_CALLS_PER_RUN})에 걸려 중단됨 — ` +
+          `날짜=${dateKST}, 지금까지 처리=${summary.attempted}건. 정상 규모(하루 최대 288회)를 크게 넘었다는 뜻이라 ` +
+          `버그(예: 재시도 큐 폭주)인지 브랜드/쿼리가 실제로 늘어난 건지 확인이 필요하다.`;
+        console.error(`⚠️ ${capMessage}`);
+        void sendIncidentAlert({
+          platform: 'cron:aggregate-daily',
+          errorType: 'llm_call_cap',
+          message: capMessage,
+          status: '남은 (쿼리,엔진) 조합은 이번 실행에서 건너뜀 — 다음 크론 실행에서 이어서 처리됨',
+        });
         break outer;
       }
 

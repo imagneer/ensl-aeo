@@ -6,6 +6,7 @@ import { isAuthorizedCronRequest } from '@/lib/cron-auth';
 import { fetchCompletedDiagnosesMissingPlacementNarrative } from '@/lib/supabase';
 import { computeAndSavePlacementNarrativeTop10 } from '@/lib/placement-narrative';
 import { getUsageRunSummary } from '@/lib/llm-usage';
+import { sendIncidentAlert } from '@/lib/email-alert';
 
 /**
  * "추천 표현 TOP10"(자리질문 mentions 원문 전체 재분석) 전용 크론
@@ -67,6 +68,13 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error('추천 표현 TOP10 계산 실패:', error);
+
+    void sendIncidentAlert({
+      platform: 'cron:compute-placement-narrative',
+      errorType: 'unhandled_exception',
+      message: error instanceof Error ? error.message : String(error),
+      status: '이번 크론 실행 전체가 실패함 — 대상 진단은 다음 실행 때 다시 걸림',
+    });
 
     return NextResponse.json(
       {

@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server';
 import { collectAndSaveAll } from '@/lib/collector';
 import { isAuthorizedCronRequest } from '@/lib/cron-auth';
+import { sendIncidentAlert } from '@/lib/email-alert';
 
 export const maxDuration = 800; // Fluid Compute 켜짐 확인됨(2026-08-19). 향후 브랜드 늘어도 재계산 불필요하도록 상한까지 미리 설정
 
@@ -64,6 +65,13 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error('파이프라인 실패:', error);
+
+    void sendIncidentAlert({
+      platform: 'cron:collect-and-save',
+      errorType: 'unhandled_exception',
+      message: error instanceof Error ? error.message : String(error),
+      status: '이번 배치 실행 전체가 실패함 — 다음 배치(하루 최대 3회)에서 다시 시도됨',
+    });
 
     return NextResponse.json(
       {

@@ -48,6 +48,7 @@ import {
 } from './llm-config';
 import { logLlmCallSuccess, logLlmCallFailure, startUsageRun, getUsageRunSummary, type LlmRunKind } from './llm-usage';
 import { retryWithBackoff, isRetryableLLMError } from './retry';
+import { sendIncidentAlert } from './email-alert';
 import { parseBrandMentions, type KnownBrand } from './parser';
 import { computeBrandSegments, getSegmentText } from './citation-linker';
 import {
@@ -459,10 +460,16 @@ export async function runMentionFeatureRoleJudgment(
     // "판정은 됐는데 검수 없이 저장되는" 사고가 날 수 있어(§1-3 위반).
     if (getUsageRunSummary().llmCalls >= MAX_LLM_CALLS_PER_RUN - 1) {
       summary.stoppedByLlmCallCap = true;
-      console.warn(
-        `⚠️ mention_feature_roles 판정이 MAX_LLM_CALLS_PER_RUN(${MAX_LLM_CALLS_PER_RUN})에 걸려 중단됨 — ` +
-          `처리 ${summary.mentionsProcessed}/${mentions.length}건에서 멈춤`
-      );
+      const capMessage =
+        `mention_feature_roles 판정이 MAX_LLM_CALLS_PER_RUN(${MAX_LLM_CALLS_PER_RUN})에 걸려 중단됨 — ` +
+        `처리 ${summary.mentionsProcessed}/${mentions.length}건에서 멈춤`;
+      console.warn(`⚠️ ${capMessage}`);
+      void sendIncidentAlert({
+        platform: 'cron:mention-feature-roles',
+        errorType: 'llm_call_cap',
+        message: capMessage,
+        status: '남은 mention은 이번 실행에서 건너뜀',
+      });
       break;
     }
 

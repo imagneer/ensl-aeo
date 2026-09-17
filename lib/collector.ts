@@ -12,6 +12,7 @@ import type { AdapterResponse } from './types';
 import { retryWithBackoff } from './retry';
 import { naverAiOverviewAdapter } from './adapters/naver-ai-briefing';
 import { googleAiOverviewAdapter } from './adapters/google-ai-overview';
+import { sendIncidentAlert, classifyEngineErrorType } from './email-alert';
 
 // 엔진 이름과 어댑터를 짝지어주는 목록.
 // 나중에 새 엔진 추가하고 싶으면 이 배열에 한 줄만 추가하면 됨.
@@ -59,10 +60,32 @@ export async function collectAll(query: string): Promise<CollectedResult[]> {
         response: result.value.response,
       };
     } else {
+      const errorMessage =
+        result.reason instanceof Error ? result.reason.message : String(result.reason);
+
+      // ⚠️ 여기가 재시도(retryWithBackoff)까지 다 실패한 뒤의 최종 실패
+      // 지점이다 — 6개 엔진 전부 이 한 곳을 거치므로, 어댑터마다 따로
+      // 알림 로직을 넣는 대신 여기 한 군데서만 판별한다(단일 진실 소스).
+      // 429는 재시도가 이미 몇 번 돌고도 실패한 경우만 여기 도달하므로
+      // "재시도로 해결 안 된 rate limit"이 맞다 — 매 재시도 시도마다
+      // 메일이 가는 게 아니다.
+      const incidentType = classifyEngineErrorType(errorMessage);
+      if (incidentType) {
+        void sendIncidentAlert({
+          platform: engine,
+          errorType: incidentType,
+          message: errorMessage,
+          status:
+            incidentType === 'rate_limit'
+              ? '자동 재시도(최대 3회)까지 다 실패함 — 계속되면 확인 필요'
+              : '인증/크레딧 문제로 추정 — 재시도로 해결 안 됨, 직접 확인 필요',
+        });
+      }
+
       return {
         engine,
         success: false,
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        error: errorMessage,
       };
     }
   });
@@ -276,16 +299,49 @@ export async function collectAndSaveAll(scope: 'all' | 'recognition' = 'recognit
   let savedMentions = 0;
   const runErrors: string[] = [];
 
+  /**
+   * ⚠️ 2026-09-18 추가 — 9/11~13에 "인지" 회차가 통째로 0건 저장되는
+   * 사고가 3일 연속 있었음(원인: Supabase 자체의 "Unresponsive Projects"
+   * 장애, Free/Nano 요금제 프로젝트가 몇 시간 뒤 응답을 멈추는 버그 —
+   * Supabase 공식 상태 페이지 확인, 9/10~9/12 발생). 우리 코드 버그가
+   * 아니라 인프라 쪽 순간 장애였는데, 그때는 재시도가 전혀 없어서
+   * 첫 실패로 그 회차 전체(최대 90건)를 그냥 날렸다.
+   *
+   * 왜 collectAndSaveOnce 전체를 재시도하는가(개별 엔진 호출이 아니라):
+   *   실패 지점이 "쿼리 목록을 가져오는" 초기 DB 읽기 자체였던 것으로
+   *   보임 — 그 시점엔 아직 아무것도 저장 전이라, 통째로 다시 시도해도
+   *   중복 저장 위험이 없다.
+   * 왜 15초를 기다리는가: Supabase 장애 공지에 "몇 초~몇십 초 안에
+   * 스스로 복구되는 경우가 많다"는 취지가 있어, retryWithBackoff의 짧은
+   * 지수 백오프(2초)보다 좀 더 여유를 뒀다. 그래도 안 되면 진짜 사고이니
+   * 미루지 말고 바로 알린다(아래 sendIncidentAlert).
+   */
   async function runOnce(label: string, runIndex: number, queryTypes: string[]) {
-    try {
-      const result = await collectAndSaveOnce(batchId, runIndex, queryTypes);
-      totalSnapshots += result.totalSnapshots;
-      savedSnapshots += result.savedSnapshots;
-      savedMentions += result.savedMentions;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error(`=== ${label} 실패: ${msg} ===`);
-      runErrors.push(`${label}: ${msg}`);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const result = await collectAndSaveOnce(batchId, runIndex, queryTypes);
+        totalSnapshots += result.totalSnapshots;
+        savedSnapshots += result.savedSnapshots;
+        savedMentions += result.savedMentions;
+        return;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+
+        if (attempt === 1) {
+          console.warn(`⚠️ ${label} 1차 시도 실패, 15초 후 재시도: ${msg}`);
+          await new Promise((resolve) => setTimeout(resolve, 15000));
+          continue;
+        }
+
+        console.error(`=== ${label} 실패 (재시도까지 실패): ${msg} ===`);
+        runErrors.push(`${label}: ${msg}`);
+        void sendIncidentAlert({
+          platform: `cron:collect-and-save:${label}`,
+          errorType: 'unhandled_exception',
+          message: msg,
+          status: `이번 회차(최대 90건)가 통째로 저장 안 됨 — 재시도(15초 뒤)까지 실패함. Supabase "Unresponsive Projects" 같은 인프라 장애일 가능성 — status.supabase.com 확인 권장`,
+        });
+      }
     }
   }
 

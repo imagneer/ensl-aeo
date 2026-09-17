@@ -6,6 +6,7 @@ import { checkAndCompleteDiagnoses } from '@/lib/brand-one-liner';
 import { isAuthorizedCronRequest } from '@/lib/cron-auth';
 import { hasAggregatedMetricsForDay } from '@/lib/supabase';
 import { getUsageRunSummary } from '@/lib/llm-usage';
+import { sendIncidentAlert } from '@/lib/email-alert';
 
 /**
  * 진단 종료 확인 — 원래 /api/aggregate-daily 안에서 그날 집계 직후 같이
@@ -55,6 +56,13 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error('진단 종료 확인 실패:', error);
+
+    void sendIncidentAlert({
+      platform: 'cron:complete-diagnoses',
+      errorType: 'unhandled_exception',
+      message: error instanceof Error ? error.message : String(error),
+      status: '이번 크론 실행 전체가 실패함 — diagnoses.status가 그대로라 다음 실행 때 자동 재시도됨',
+    });
 
     return NextResponse.json(
       {
