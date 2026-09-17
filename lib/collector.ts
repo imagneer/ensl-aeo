@@ -181,12 +181,21 @@ export async function collectAndSaveOnce(
         // 이전에는 여기서 r.response.citations(답변 전체 출처)를 모든 브랜드에
         // 똑같이 복사했다. 판정 규칙은 lib/citation-linker.ts 참고.
         // linked는 overallRanking과 같은 순서·같은 길이라 인덱스로 짝짓는다.
-        const linked = linkCitationsToMentions(
-          r.response.rawText,
-          overallRanking,
-          r.response.citedSpans,
-          knownBrands          
-        );
+        //
+        // ⚠️ 2026-09-14 Perplexity 예외: 이 엔진 자체가 "사용한 것"을 구조적으로
+        // 안 줘서(citationTrackingUnavailable), linkCitationsToMentions를 부르면
+        // 출처 구간이 하나도 없어 전부 'none'이 나온다 — "AI가 근거 없이
+        // 말했다"는 것과 "우리가 이 엔진에서 근거를 잴 수 없다"는 다른 사실인데
+        // 섞이게 된다. 그래서 이 경우엔 판정 함수를 아예 안 부르고 바로
+        // 'unavailable'로 채운다(citation-linker.ts CitationConfidence 주석 참고).
+        const linked = r.response.citationTrackingUnavailable
+          ? overallRanking.map(() => ({ urls: [], domains: [], confidence: 'unavailable' as const }))
+          : linkCitationsToMentions(
+              r.response.rawText,
+              overallRanking,
+              r.response.citedSpans,
+              knownBrands
+            );
 
         const mentionsToSave = overallRanking.map((m, i) => ({
           snapshotId,

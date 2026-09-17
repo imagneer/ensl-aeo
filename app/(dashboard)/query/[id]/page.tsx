@@ -147,6 +147,15 @@ export default async function QueryDetailPage({
         });
       }
 
+      // 2026-09-14: Perplexity는 "사용한 것" 자체를 구조적으로 못 줘서 항상
+      // citationConfidence='unavailable'이다(citation-linker.ts 참고). 이걸
+      // sources.length===0인 다른 경우("AI가 근거 없이 말함")와 똑같이 빈
+      // 칸으로 보여주면, 사용자가 "이 답변엔 근거가 없구나"로 오해한다 —
+      // 실제로는 "이 엔진에서는 근거를 잴 수가 없다"가 맞는 설명이라 배지로
+      // 구분한다(docs/claude_day8-decision-citation-linking.md 2026-09-14 갱신).
+      const citationUnavailable =
+        r.mentions.length > 0 && r.mentions.every((m) => m.citationConfidence === 'unavailable');
+
       return {
         id: r.id,
         engineLabel: engineLabel(r.engine),
@@ -156,6 +165,7 @@ export default async function QueryDetailPage({
         shortQuote: truncateExcerpt(r.rawResponse, 160),
         fullQuote: r.rawResponse,
         sources: Array.from(sourcePairs.entries()).map(([url, domain]) => ({ url, domain })),
+        citationUnavailable,
       };
     });
 

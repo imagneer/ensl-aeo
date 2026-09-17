@@ -445,10 +445,21 @@ export async function aggregateOne(
 
   // C(인용): retrievedSources 유무와 무관하게, mentions.sourceDomains로 직접 판정.
   // (ChatGPT도 citedSpans는 별도로 있어서 여기선 정상적으로 true/false가 나온다)
+  //
+  // ⚠️ 2026-09-14 Perplexity 예외: 이 엔진은 mentions.citation_confidence가
+  // 항상 'unavailable'이라 sourceDomains도 항상 빈 배열이다. 그대로 두면
+  // "인용 안 함"(false)이 되는데, 실제 사실은 "이 엔진에서는 잴 수 없음"이다.
+  // aggregateOne은 엔진 하나만 다루므로(params.engine 고정), 그 엔진의
+  // targetMentions가 하나라도 있다면 전부 같은 판정일 것이다 — hasSource와
+  // 같은 패턴으로 null(확인 불가)을 추가한다.
   const targetMentions = mentions.filter((m) => m.brandId === params.targetBrandId);
-  const hasCitation: boolean = targetDomain
-    ? targetMentions.some((m) => m.sourceDomains?.includes(targetDomain))
-    : false;
+  const citationUnavailableForEngine =
+    targetMentions.length > 0 && targetMentions.every((m) => m.citationConfidence === 'unavailable');
+  const hasCitation: boolean | null = citationUnavailableForEngine
+    ? null
+    : targetDomain
+      ? targetMentions.some((m) => m.sourceDomains?.includes(targetDomain))
+      : false;
 
   // 경쟁사 특징 추출 2단계 (2026-09-03): 타겟 브랜드와 완전히 같은 함수
   // (attemptKeywordExtraction)를 경쟁사 이름으로 재호출한다. 언급이 없었던

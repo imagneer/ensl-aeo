@@ -24,6 +24,8 @@ export interface EvidenceCardData {
   shortQuote: string;
   fullQuote: string;
   sources: { domain: string; url: string }[];
+  /** 2026-09-14: 이 엔진은 "사용한 것"을 구조적으로 안 줌(현재 Perplexity만) — sources가 비어도 "근거 없음"이 아니라 "측정 불가"임을 밝혀야 함 */
+  citationUnavailable?: boolean;
 }
 
 function EvidenceCard({ card }: { card: EvidenceCardData }) {
@@ -57,6 +59,9 @@ function EvidenceCard({ card }: { card: EvidenceCardData }) {
             </a>
           ))}
         </p>
+      )}
+      {card.sources.length === 0 && card.citationUnavailable && (
+        <span className="badge unavailable">인용 출처 미제공</span>
       )}
       {canExpand && (
         <button className="expand-btn" onClick={() => setExpanded((v) => !v)}>

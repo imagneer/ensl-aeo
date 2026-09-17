@@ -60,7 +60,16 @@
 import type { CitedSpan } from './types';
 import type { OverallMention } from './parser';
 
-export type CitationConfidence = 'confirmed' | 'estimated' | 'none';
+/**
+ * ⚠️ 'none'과 'unavailable'을 절대 같은 뜻으로 쓰지 않는다:
+ *   none        = 이 mention엔 출처 구간이 없었다(그때그때 다를 수 있는 개별 관측)
+ *   unavailable = 이 엔진 자체가 "사용한 것"을 구조적으로 제공 안 함(2026-09-14
+ *                 확인, Perplexity Agent API — AdapterResponse.citationTrackingUnavailable
+ *                 참고). linkCitationsToMentions는 이 값을 만들지 않는다 —
+ *                 호출부(collector.ts)가 AdapterResponse 단계에서 미리 걸러서
+ *                 이 함수 자체를 부르지 않고 바로 'unavailable'로 채운다.
+ */
+export type CitationConfidence = 'confirmed' | 'estimated' | 'none' | 'unavailable';
 
 export interface LinkedCitation {
   /** 이 브랜드에 연결된 출처 주소들 (중복 제거) */

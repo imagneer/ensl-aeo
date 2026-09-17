@@ -126,6 +126,22 @@ export interface AdapterResponse {
   citedSpans: CitedSpan[];
 
   /**
+   * "사용한 것" 판정 자체가 이 엔진에서 구조적으로 불가능한지.
+   *
+   * ⚠️ citedSpans가 빈 배열([])인 것과는 다른 뜻이다:
+   *   citedSpans=[], 이 값 없음/false = 이번 답변엔 AI가 근거를 안 댔다(정상적인 개별 관측)
+   *   citedSpans=[], 이 값 true       = 이 엔진 자체가 "사용한 것"을 알려주지 않는다(엔진 차원의 한계)
+   * 이 둘을 섞으면 "Perplexity는 항상 근거 없이 말한다"는 거짓 결론이 나온다.
+   *
+   * (2026-09-14 확인) Perplexity가 Sonar Chat Completions → Agent API로
+   * 전환하며, `model=perplexity/sonar` 고정 시 답변 본문에 `[n]` 인용
+   * 마커가 4/4 테스트 전부 나오지 않는 것을 실측 확인함(검색 자체는
+   * 정상 수행, search_results도 정상 수신 — "본 것"은 문제없음).
+   * 상세: docs/claude_day8-decision-citation-linking.md "2026-09-14 갱신".
+   */
+  citationTrackingUnavailable?: boolean;
+
+  /**
    * @deprecated citedSpans에서 파생된 고유 URL 목록 (하위 호환용).
    *
    * 기존 코드(collector.ts 등)가 이 필드를 참조하고 있어 한 번에 걷어내지 않았다.

@@ -182,6 +182,7 @@ MVP Day 4에서 상세 스키마를 설계할 예정. 여기서는 핵심 엔티
 - ChatGPT는 모델 라우팅·검색 호출 여부·샘플링이 매번 달라서 같은 질문도 결과가 바뀜. 복수 회 측정 후 노출률(%)로 표기해야 의미 있음.
 - ChatGPT 시크릿모드 폐지 — 로그인+임시채팅이 현실적 최선이나 API 호출과 웹 UI 결과가 다를 수 있음.
 - Gemini 시크릿 vs ChatGPT 임시채팅은 조건 비대칭 — 완전히 동일한 조건 재현은 불가, 한계로 명시하고 진행.
+- **Perplexity: API ≠ 웹 제품 경험 (2026-09-14 확인).** Sonar Chat Completions → Agent API 강제 전환(2026-09-27) 과정에서, `model=perplexity/sonar`로 고정해 API를 호출하면 답변 본문에 인용 각주(`[n]`)가 붙지 않는 것을 실측 확인함(검색·후보 출처 목록 수신은 정상). 실제 perplexity.ai 웹 UI에는 각주가 표시되므로, 이 갭은 Perplexity 서비스 자체의 한계가 아니라 API 경로의 한계로 추정 — ChatGPT의 "API 호출과 웹 UI 결과가 다를 수 있음"과 같은 패턴. 그래서 Perplexity는 "본 것(검색 후보)"까지만 측정하고 "사용한 것(인용)"은 측정 불가로 명시 처리함(대시보드에 배지 표시, 엔진 간 "사용한 것" 비교 지표에서 ChatGPT와 함께 제외). 상세: `docs/claude_day8-decision-citation-linking.md` "2026-09-14 갱신".
 
 ### 기술적 리스크
 - **구글 AI Overviews**: 공식 API 없음. 웹 스크래핑 또는 Gemini API로 대체 가능성 조사 필요.

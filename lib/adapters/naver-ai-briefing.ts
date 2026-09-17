@@ -51,8 +51,11 @@ interface NaverTextBlock {
 /**
  * text_blocks를 순서대로 훑으며 rawText를 조립하고, 동시에 CitedSpan을 만든다.
  *
- * Perplexity(findSpanStart)와 다른 점: 위치를 문자열에서 "찾는" 게 아니라
- * "만들면서 기록"한다. 그래서 precision이 'exact'다 — 추측이 섞이지 않는다.
+ * (다른 엔진과 다른 점) 위치를 문자열에서 "찾는" 게 아니라 "만들면서
+ * 기록"한다. 그래서 precision이 'exact'다 — 추측이 섞이지 않는다.
+ * ⚠️ 2026-09-14: 이 비교 대상이었던 Perplexity의 findSpanStart(마커 위치
+ * 추정 방식)는 Agent API 전환으로 제거됨(더 이상 인용 마커를 안 줌) —
+ * docs/claude_day8-decision-citation-linking.md "2026-09-14 갱신" 참고.
  *
  * @param references index(1-based) → 출처 정보 조회용 원본 배열
  */
